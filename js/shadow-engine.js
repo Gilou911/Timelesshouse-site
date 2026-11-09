@@ -178,7 +178,7 @@ export function fillTerrain(T, grid, mosaic, zoom) {
  * Rasterise des bâtiments (polygones en unités Mercator) dans le champ de hauteurs H (déjà rempli par le relief T).
  * buildings = { coords: Float64Array [x0,y0,x1,y1,…], ringStart: Int32Array (indices de sommets, sentinelle finale),
  *               polyStart: Int32Array (indices d'anneaux, sentinelle finale), heights: Float32Array (par polygone) }
- * Le toit est plat : base = relief au centroïde de l'anneau extérieur.
+ * Le toit suit le relief (hauteur ajoutée au relief de chaque cellule), sans marche aux bords de tuiles.
  * @returns nombre de polygones ayant touché au moins une cellule
  */
 export function rasterizeBuildings(H, T, grid, buildings) {
@@ -215,8 +215,8 @@ export function rasterizeBuildings(H, T, grid, buildings) {
     cy /= cn;
     const ccx = Math.min(w - 1, Math.max(0, Math.floor(cx)));
     const ccy = Math.min(h - 1, Math.max(0, Math.floor(cy)));
-    const base = T[ccy * w + ccx];
-    const top = base + height;
+    // Le toit suit le relief sous l'emprise (hauteur ajoutée cellule par cellule) : un toit plat calé sur le
+    // centroïde créerait une marche à chaque bord de tuile vectorielle, où les emprises sont découpées.
     const yStart = Math.max(0, Math.floor(minY));
     const yEnd = Math.min(h - 1, Math.ceil(maxY));
     let filled = 0;
@@ -246,6 +246,7 @@ export function rasterizeBuildings(H, T, grid, buildings) {
         const xb = Math.min(w - 1, Math.floor(xs[k + 1] - 0.5));
         for (let x = xa; x <= xb; x++) {
           const i = y * w + x;
+          const top = T[i] + height;
           if (top > H[i]) H[i] = top;
           filled++;
         }
@@ -254,6 +255,7 @@ export function rasterizeBuildings(H, T, grid, buildings) {
     if (filled === 0 && cx >= 0 && cx < w && cy >= 0 && cy < h) {
       // Bâtiment plus petit qu'une cellule : on marque la cellule du centroïde.
       const i = ccy * w + ccx;
+      const top = T[i] + height;
       if (top > H[i]) H[i] = top;
       filled = 1;
     }
@@ -289,13 +291,14 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
   // d'échelle de la projection Mercator avec la latitude sur les vues très étendues.
   const drop = Math.tan(altitude * RAD) * stepMeters;
 
-  // Position calculée par multiplication (x0 + k·sx) et non par accumulation : toutes les lignes partagent
-  // exactement le même décalage fractionnaire à la colonne k, donc l'arrondi est cohérent et aucune cellule n'est sautée.
+  // Décalage entier arrondi AVANT l'ajout au point de départ : toutes les lignes partagent exactement le même
+  // décalage au pas k (x0 + k·sx arrondi après addition pouvait basculer d'un côté ou de l'autre d'un demi-entier
+  // selon x0, et sauter des cellules aux azimuts « à égalité »). Avec un décalage commun, la couverture est totale.
   const line = (x0, y0) => {
     let top = -Infinity;
     for (let k = 0; ; k++) {
-      const ix = Math.round(x0 + k * sx);
-      const iy = Math.round(y0 + k * sy);
+      const ix = x0 + Math.round(k * sx);
+      const iy = y0 + Math.round(k * sy);
       if (ix < 0 || ix >= w || iy < 0 || iy >= h) break;
       const i = iy * w + ix;
       const z = H[i];

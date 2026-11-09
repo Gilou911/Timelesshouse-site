@@ -61,7 +61,7 @@ test('pente face au nord sous soleil bas au sud : ombrée ; le sommet reste écl
   assert.equal(depth[40 * w + 30], 0, 'versant sud éclairé');
 });
 
-test('rasterisation d\'un bâtiment rectangulaire avec trou, toit plat sur relief', () => {
+test('rasterisation d\'un bâtiment rectangulaire avec trou, toit suivant le relief', () => {
   const w = 20;
   const h = 20;
   const gridSpec = { w, h, originX: 0, originY: 0, cellUnits: 1 };
@@ -78,12 +78,21 @@ test('rasterisation d\'un bâtiment rectangulaire avec trou, toit plat sur relie
   const heights = new Float32Array([25]);
   const touched = rasterizeBuildings(H, T, gridSpec, { coords, ringStart, polyStart, heights });
   assert.equal(touched, 1);
-  // Base = relief au centroïde (8,8) → T = 100 + 8 = 108 ; toit = 133 partout.
-  assert.equal(H[5 * w + 5], 133);
-  assert.equal(H[11 * w + 11], 133);
+  // Toit = relief de la cellule + 25 m (le relief croît de 1 m par colonne).
+  assert.equal(H[5 * w + 5], 100 + 5 + 25);
+  assert.equal(H[11 * w + 11], 100 + 11 + 25);
   assert.equal(H[8 * w + 8], T[8 * w + 8], 'le trou garde le relief');
   assert.equal(H[3 * w + 3], T[3 * w + 3], 'hors bâtiment inchangé');
   assert.equal(H[12 * w + 12], T[12 * w + 12], 'bord exclusif');
+  // Deux morceaux d'un même bâtiment (découpe de tuile) donnent des toits continus au raccord.
+  const H2 = new Float32Array(T);
+  rasterizeBuildings(H2, T, gridSpec, {
+    coords: new Float64Array([4, 4, 8, 4, 8, 12, 4, 12, 8, 4, 12, 4, 12, 12, 8, 12]),
+    ringStart: new Int32Array([0, 4, 8]),
+    polyStart: new Int32Array([0, 1, 2]),
+    heights: new Float32Array([25, 25]),
+  });
+  assert.equal(H2[6 * w + 7] + 1, H2[6 * w + 8], 'pas de marche au raccord des morceaux');
 });
 
 test('bâtiment plus petit qu\'une cellule : la cellule du centroïde est marquée', () => {
@@ -245,7 +254,15 @@ test('balayage : chaque cellule est visitée pour tout azimut (plateau uniforme 
   // Dalle de 100 m couvrant tout le bord « côté soleil » : toute cellule non couverte par une ligne resterait éclairée.
   const w = 50;
   const h = 37;
-  for (let az = 0; az < 360; az += 7.5) {
+  const azimuths = [];
+  for (let az = 0; az < 360; az += 7.5) azimuths.push(az);
+  // Azimuts « à égalité » exacte (pas mineur = ±1/2, ±1/4, ±3/4, ±1/3 de cellule).
+  for (const r of [0.5, 0.25, 0.75, 1 / 3]) {
+    for (const q of [Math.atan(r), Math.PI / 2 - Math.atan(r)]) {
+      for (let k = 0; k < 4; k++) azimuths.push(((q * 180) / Math.PI + 90 * k) % 360);
+    }
+  }
+  for (const az of azimuths) {
     const H = new Float32Array(w * h);
     const depth = new Float32Array(w * h);
     // Un mur très haut tout autour du bord : toute cellule intérieure doit être à l'ombre pour un soleil bas.
