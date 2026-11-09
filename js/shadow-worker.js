@@ -74,15 +74,17 @@ async function decodeWithCanvas(blob) {
 async function decodeBlob(blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   // Taille lue dans l'en-tête avant tout décodage : une tuile qui ne fait pas TILE_SIZE est refusée sans être
-  // décompressée, ni ici ni par le canvas (une image géante épuiserait la mémoire du worker).
+  // décompressée, ni ici ni par le canvas (une image géante épuiserait la mémoire du worker). Terrarium est un
+  // format PNG : une image d'un autre format, dont on ne peut pas lire la taille d'avance, est refusée aussi.
   const size = pngSize(bytes);
-  if (size && (size.width !== TILE_SIZE || size.height !== TILE_SIZE)) throw new Error('Taille de tuile inattendue');
+  if (!size) throw new Error('Tuile de relief illisible : pas un PNG');
+  if (size.width !== TILE_SIZE || size.height !== TILE_SIZE) throw new Error('Taille de tuile inattendue');
   let img = null;
   if (canDecodePNG) {
     try {
       img = await decodePNG(bytes);
     } catch {
-      // format hors du décodeur maison (16 bits, entrelacé, autre type d'image) : repli sur le canvas
+      // PNG hors du décodeur maison (16 bits, entrelacé) : repli sur le canvas, à la taille déjà vérifiée
     }
   }
   if (!img) {
