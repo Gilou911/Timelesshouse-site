@@ -3,11 +3,13 @@
   color-scheme: light dark;
   --bg: #f2f2f7;
   --material: rgba(255, 255, 255, 0.9);
+  --material-solid: #ffffff;
   --separator: rgba(60, 60, 67, 0.16);
   --text: #1d1d1f;
   --text-2: #636366; /* 4,5:1 au moins sur le panneau, même au-dessus d'une image satellite sombre */
   --fill: rgba(118, 118, 128, 0.12);
   --fill-2: rgba(118, 118, 128, 0.22);
+  --seg-thumb: #ffffff;
   --accent: #0071e3; /* aplats : lecture, interrupteurs, point mesuré */
   --accent-text: #0066cc; /* textes et icônes qui se touchent */
   --on-accent: #ffffff;
@@ -17,7 +19,11 @@
   --day: #ffcc00;
   --night: rgba(60, 60, 67, 0.18);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.12);
-  --radius: 14px;
+  --blur: saturate(180%) blur(20px);
+  /* Deux rayons : 8 px pour tout ce qui se touche (jamais de gélule), 14 px pour les surfaces. */
+  --r-control: 8px;
+  --r-surface: 14px;
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1); /* courbe des feuilles iOS */
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
   /* Cible minimale : 44 px au toucher ; 36 px sur grand écran sans pointeur tactile (macOS : 28 px minimum). */
   --hit: 44px;
@@ -32,11 +38,13 @@
   :root {
     --bg: #000000;
     --material: rgba(28, 28, 30, 0.92);
+    --material-solid: #1c1c1e;
     --separator: rgba(84, 84, 88, 0.5);
     --text: #f5f5f7;
     --text-2: #a1a1a6;
     --fill: rgba(118, 118, 128, 0.24);
     --fill-2: rgba(118, 118, 128, 0.36);
+    --seg-thumb: #636366;
     --accent: #0a84ff;
     --accent-text: #409cff;
     --danger: #ff6961;
@@ -49,14 +57,16 @@
 }
 @media (min-width: 761px) { :root { --hit: 36px; } }
 @media (any-pointer: coarse) { :root { --hit: 44px; } }
+/* Sans flou possible, ou transparence réduite, ou contraste accru : des surfaces pleines. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { :root { --material: var(--material-solid); } }
+@media (prefers-reduced-transparency: reduce) { :root { --material: var(--material-solid); } }
+@media (prefers-contrast: more) { :root { --material: var(--material-solid); --separator: var(--text-2); } }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.search input:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); border-radius: var(--radius); }
-.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
-#time:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 button, a, label { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 html, body { height: 100%; margin: 0; }
 body {
@@ -66,15 +76,36 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Matériau : la couche des commandes flotte au-dessus de la carte. */
+.brand, .search, .panel-toggle, .results, .panel, .timebar, #map .maplibregl-ctrl-group {
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+
+/* ---------- Carte ---------- */
 #map { position: fixed; inset: 0; }
-#map .maplibregl-ctrl-top-right { top: calc(var(--topbar-h) + var(--safe-t) + 8px); right: var(--safe-r); }
+#map .maplibregl-ctrl-top-right { top: calc(var(--topbar-h) + var(--safe-t)); right: var(--safe-r); }
 #map .maplibregl-ctrl-bottom-right, #map .maplibregl-ctrl-bottom-left { bottom: var(--timebar-h); }
 #map .maplibregl-ctrl-bottom-right { right: var(--safe-r); }
 #map .maplibregl-ctrl-bottom-left { left: var(--safe-l); }
-#map .maplibregl-ctrl-group button { width: var(--hit); height: var(--hit); }
-.maplibregl-ctrl-attrib { font-size: 0.6875rem; }
+#map .maplibregl-ctrl-group {
+  border-radius: var(--r-control); overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--separator), var(--shadow);
+}
+#map .maplibregl-ctrl-group button { width: var(--hit); height: var(--hit); background-color: transparent; }
+#map .maplibregl-ctrl-group button + button { border-top: 1px solid var(--separator); }
+#map .maplibregl-ctrl-attrib {
+  font-size: 0.6875rem; color: var(--text-2); background: var(--material); border-radius: 6px;
+}
+#map .maplibregl-ctrl-attrib a { color: var(--text-2); }
+.maplibregl-ctrl-attrib-button { border-radius: 6px; }
 /* Le bouton « i » de l'attribution reste petit à l'œil ; sa zone de toucher fait 44 px. */
 .maplibregl-ctrl-attrib-button::after { content: ""; position: absolute; inset: -10px; }
+@media (prefers-color-scheme: dark) {
+  #map .maplibregl-ctrl-icon, .maplibregl-ctrl-attrib-button { filter: invert(1); }
+}
 
 /* ---------- Barre du haut ---------- */
 .topbar {
@@ -84,154 +115,177 @@ body {
   pointer-events: none; z-index: 20;
 }
 .topbar > * { pointer-events: auto; }
-.brand {
-  display: flex; align-items: center; gap: 8px; flex: none; text-decoration: none; color: var(--text);
-  background: var(--material); border: 1px solid var(--separator); border-radius: var(--radius);
-  padding: 0 12px 0 8px; height: var(--hit); box-shadow: var(--shadow); backdrop-filter: blur(10px);
-}
+.brand, .search, .panel-toggle { height: var(--hit); border-radius: var(--r-control); box-shadow: inset 0 0 0 1px var(--separator), var(--shadow); }
+.brand { display: flex; align-items: center; gap: 8px; flex: none; padding: 0 12px 0 8px; text-decoration: none; color: var(--text); }
 .brand-icon { width: 26px; height: 26px; }
-.brand-name { font-weight: 700; letter-spacing: 0.2px; }
-.brand-sub { font-size: 0.6875rem; color: var(--text-2); }
-.search {
-  position: relative; display: flex; align-items: center; flex: 1; min-width: 0; max-width: 460px; height: var(--hit);
-  background: var(--material); border-radius: var(--radius);
-  /* Trait intérieur plutôt que bordure : les boutons gardent toute la hauteur de la cible. */
-  box-shadow: inset 0 0 0 1px var(--separator), var(--shadow); backdrop-filter: blur(10px);
-}
+.brand-name { font-weight: 600; letter-spacing: -0.01em; }
+.brand-sub { font-size: 0.75rem; color: var(--text-2); }
+.search { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; max-width: 460px; padding-left: 10px; }
+.search:focus-within { box-shadow: inset 0 0 0 2px var(--accent), var(--shadow); }
+.search-icon { flex: none; width: 18px; height: 18px; color: var(--text-2); }
 .search input {
-  flex: 1; width: 100%; min-width: 0; height: 100%; background: transparent; border: 0; color: var(--text);
-  padding: 0 12px; font: inherit; font-size: 1rem; outline: none;
+  flex: 1; width: 100%; min-width: 0; height: 100%; padding: 0 8px; border: 0; outline: none;
+  background: transparent; color: var(--text); font: inherit; font-size: 1rem;
 }
 .search input::placeholder { color: var(--text-2); }
 .search button {
-  width: var(--hit); flex: none; height: 100%; border: 0; background: transparent; color: var(--accent-text); cursor: pointer;
+  flex: none; width: var(--hit); height: 100%; border: 0; background: transparent; color: var(--accent-text); cursor: pointer;
   display: grid; place-items: center;
 }
-.search button svg { width: 20px; height: 20px; }
+.search button svg { width: 18px; height: 18px; }
+@media (prefers-color-scheme: dark) { .search input::-webkit-search-cancel-button { filter: invert(1); } }
 .results {
   position: absolute; top: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 6px; list-style: none;
-  background: var(--material); border: 1px solid var(--separator); border-radius: var(--radius);
-  box-shadow: var(--shadow); backdrop-filter: blur(10px); max-height: 50vh; overflow: auto;
+  border-radius: var(--r-surface); box-shadow: inset 0 0 0 1px var(--separator), var(--shadow); max-height: 50vh; overflow: auto;
 }
 .results li {
-  display: flex; align-items: center; min-height: var(--hit); padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  display: flex; align-items: center; min-height: var(--hit); padding: 8px 10px; border-radius: 6px; cursor: pointer;
   font-size: 0.9375rem; line-height: 1.3;
 }
 .results li:focus { background: var(--fill); outline: none; }
 .results li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .results li.empty { color: var(--text-2); cursor: default; }
 .panel-toggle {
-  display: none; align-items: center; gap: 6px; flex: none; height: var(--hit); padding: 0 12px; border-radius: var(--radius);
-  background: var(--material); border: 1px solid var(--separator); color: var(--text); cursor: pointer;
-  box-shadow: var(--shadow); font: inherit; font-size: 0.9375rem;
+  display: none; align-items: center; gap: 6px; flex: none; padding: 0 12px; border: 0;
+  color: var(--text); cursor: pointer; font: inherit; font-size: 0.9375rem;
 }
+.panel-toggle[aria-expanded="true"] { color: var(--accent-text); }
 .panel-toggle svg { width: 18px; height: 18px; color: var(--dawn); }
 
-/* ---------- Panneau latéral ---------- */
+/* ---------- Panneau : une seule surface, des sections séparées par un filet ---------- */
 .panel {
-  position: fixed; top: calc(var(--topbar-h) + var(--safe-t) + 4px); left: calc(12px + var(--safe-l)); width: 320px;
-  max-height: calc(100vh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - 16px);
-  overflow: auto; display: flex; flex-direction: column; gap: 10px; z-index: 15;
-  scrollbar-width: thin;
+  position: fixed; top: calc(var(--topbar-h) + var(--safe-t)); left: calc(12px + var(--safe-l)); width: 320px; z-index: 15;
+  max-height: calc(100vh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - 12px);
+  overflow: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  padding: 0 16px; border-radius: var(--r-surface); box-shadow: inset 0 0 0 1px var(--separator), var(--shadow);
 }
-.card {
-  background: var(--material); border: 1px solid var(--separator); border-radius: var(--radius);
-  padding: 12px 14px; box-shadow: var(--shadow); backdrop-filter: blur(10px);
-}
+.card { padding: 14px 0; }
+.card + .card { border-top: 1px solid var(--separator); }
 /* Les titres disent la chose, en phrase normale : pas de capitales espacées. */
 .card h2 { margin: 0 0 8px; font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
-.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .section-head h2 { margin: 0; }
 .phase { font-size: 0.9375rem; color: var(--text-2); text-align: right; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin: 0; }
 .grid2 dt { font-size: 0.8125rem; color: var(--text-2); }
-.grid2 dd { margin: 0; font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
-.hint { margin: 0; font-size: 0.875rem; color: var(--text-2); line-height: 1.4; }
-.exposure-total { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.grid2 dd { margin: 2px 0 0; font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+.hint { margin: 0; font-size: 0.875rem; color: var(--text-2); line-height: 1.45; }
+.exposure-total { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .exposure-total span { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .exposure-total small { font-size: 0.9375rem; color: var(--text-2); }
-.exposure-list { margin: 0 0 8px; padding: 0; list-style: none; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.exposure-list { margin: 0 0 10px; padding: 0; list-style: none; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
 .exposure-list li { padding: 2px 0; }
-.exposure-bar { height: 10px; border-radius: 5px; background: var(--fill); overflow: hidden; margin-bottom: 8px; }
+.exposure-bar { height: 8px; border-radius: 2px; background: var(--fill); overflow: hidden; margin-bottom: 6px; }
 .exposure-bar i { display: block; height: 100%; background: var(--sun); position: relative; float: left; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #exposure-meta { font-size: 0.8125rem; color: var(--text-2); }
 .link {
-  flex: none; min-height: var(--hit); background: none; border: 0; color: var(--accent-text); cursor: pointer;
-  font: inherit; font-size: 0.9375rem; padding: 0 4px;
+  flex: none; min-height: var(--hit); padding: 0 4px; border: 0; background: none; color: var(--accent-text); cursor: pointer;
+  font: inherit; font-size: 0.9375rem;
 }
-.switch { display: flex; align-items: center; gap: 10px; min-height: var(--hit); font-size: 0.9375rem; cursor: pointer; }
-.switch input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
-.seg { display: flex; gap: 0; margin: 8px 0; border: 1px solid var(--separator); border-radius: 10px; overflow: hidden; }
-.seg label { flex: 1; }
+
+/* Segments iOS : un curseur blanc glisse sous l'option choisie. */
+.seg { position: relative; display: flex; margin: 10px 0; padding: 2px; border-radius: var(--r-control); background: var(--fill); }
+.seg::before {
+  content: ""; position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc(50% - 2px); border-radius: 6px;
+  background: var(--seg-thumb); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
+  transition: transform 250ms var(--ease-out);
+}
+.seg:has(label:nth-child(2) input:checked)::before { transform: translateX(100%); }
+.seg label { position: relative; z-index: 1; flex: 1; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg span {
   display: flex; align-items: center; justify-content: center; min-height: var(--hit); padding: 0 8px; text-align: center;
-  font-size: 0.875rem; cursor: pointer; color: var(--text-2);
+  font-size: 0.875rem; color: var(--text); cursor: pointer;
 }
-.seg input:checked + span { background: var(--fill-2); color: var(--text); font-weight: 600; }
+.seg input:checked + span { font-weight: 600; }
+@supports not selector(:has(*)) {
+  .seg::before { display: none; }
+  .seg input:checked + span { border-radius: 6px; background: var(--seg-thumb); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12); }
+}
+
+/* Interrupteurs iOS : la seule forme arrondie de bout en bout, comme le contrôle natif. */
+.switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--hit); font-size: 0.9375rem; cursor: pointer; }
+.switch input {
+  -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 51px; height: 31px; margin: 0;
+  border-radius: 16px; background: var(--fill-2); cursor: pointer; transition: background-color 200ms ease-out;
+}
+.switch input::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 3px 1px rgba(0, 0, 0, 0.06);
+  transition: transform 200ms var(--ease-out);
+}
+.switch input:checked { background: var(--accent); }
+.switch input:checked::before { transform: translateX(20px); }
+
 .legend { margin: 6px 0 10px; }
-.legend-bar { height: 10px; border-radius: 5px; background: linear-gradient(90deg, #1c2456 0%, #603a8a 25%, #cc5c4a 50%, #f5a623 75%, #ffee82 100%); }
-.legend-labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-2); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.legend-bar { height: 8px; border-radius: 2px; background: linear-gradient(90deg, #1c2456 0%, #603a8a 25%, #cc5c4a 50%, #f5a623 75%, #ffee82 100%); }
+.legend-labels { display: flex; justify-content: space-between; margin-top: 4px; font-size: 0.75rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .legend .hint { margin-top: 6px; font-size: 0.8125rem; }
-.range-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8125rem; color: var(--text-2); margin-top: 6px; }
+.range-label { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 0.8125rem; color: var(--text-2); }
 .range-label input { width: 100%; height: var(--hit); margin: 0; accent-color: var(--accent); }
-/* Bouton gris à libellé teinté (style iOS « gray ») : action secondaire. */
+
+/* Bouton gris à libellé teinté (style iOS « gray ») : actions secondaires. */
 .btn {
-  min-height: var(--hit); background: var(--fill); border: 0; color: var(--accent-text);
-  border-radius: 10px; padding: 0 14px; font: inherit; font-size: 0.9375rem; font-weight: 500; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; min-height: var(--hit); padding: 0 14px; border: 0; border-radius: var(--r-control);
+  background: var(--fill); color: var(--accent-text); font: inherit; font-size: 0.9375rem; font-weight: 500; cursor: pointer;
 }
+.btn svg { width: 18px; height: 18px; }
 .btn.small { padding: 0 12px; white-space: nowrap; }
 .ok { color: var(--text-2); font-size: 0.8125rem; }
-.fineprint { margin: 8px 0 0; font-size: 0.75rem; color: var(--text-2); line-height: 1.4; }
+.fineprint { margin: 10px 0 0; font-size: 0.75rem; color: var(--text-2); line-height: 1.45; }
 
 /* ---------- Barre du temps ---------- */
 .timebar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  background: var(--material); border-top: 1px solid var(--separator); backdrop-filter: blur(12px);
+  border-top: 1px solid var(--separator);
   padding: 10px calc(16px + var(--safe-r)) calc(10px + var(--safe-b)) calc(16px + var(--safe-l));
   display: flex; flex-direction: column; gap: 4px;
 }
 /* Ligne du jour (date, maintenant, fuseau), puis ligne de lecture : lecture, curseur, heure. */
 .day-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.time-row { display: flex; align-items: center; gap: 12px; }
+.time-row { display: flex; align-items: center; gap: 14px; }
 .icon-btn {
-  width: var(--hit); height: var(--hit); border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); cursor: pointer;
-  display: grid; place-items: center; flex: none;
+  display: grid; place-items: center; flex: none; width: var(--hit); height: var(--hit); border: 0; border-radius: var(--r-control);
+  background: var(--accent); color: var(--on-accent); cursor: pointer;
 }
-.icon-btn svg { width: 22px; height: 22px; display: block; }
+.icon-btn svg { width: 20px; height: 20px; display: block; }
 .icon-btn .ic-pause { display: none; }
 .icon-btn.playing .ic-play { display: none; }
 .icon-btn.playing .ic-pause { display: block; }
 #date {
-  min-height: var(--hit); background: var(--fill); border: 0; color: var(--text);
-  border-radius: 10px; padding: 0 10px; font: inherit; font-size: 1rem;
+  min-height: var(--hit); padding: 0 10px; border: 0; border-radius: var(--r-control);
+  background: var(--fill); color: var(--text); font: inherit; font-size: 1rem;
 }
-.time-label { flex: none; font-size: 1.625rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.time-label { flex: none; font-size: 1.75rem; font-weight: 600; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .tz-label { margin-left: auto; min-width: 0; font-size: 0.75rem; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slider-row { position: relative; flex: 1; min-width: 0; }
 /* L'input garde la hauteur d'une cible tactile ; la piste porte la bande jour/nuit (--daylight, posée par le script). */
 #time {
   -webkit-appearance: none; appearance: none; display: block; width: 100%; height: var(--hit); margin: 0;
-  background: transparent; outline: none; cursor: pointer;
+  background: transparent; cursor: pointer;
 }
-#time::-webkit-slider-runnable-track { height: 12px; border-radius: 6px; background: var(--daylight, var(--night)); }
-#time::-moz-range-track { height: 12px; border-radius: 6px; background: var(--daylight, var(--night)); }
+#time::-webkit-slider-runnable-track { height: 8px; border-radius: 3px; background: var(--daylight, var(--night)); }
+#time::-moz-range-track { height: 8px; border-radius: 3px; background: var(--daylight, var(--night)); }
 #time::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 22px; height: 22px; margin-top: -5px; border-radius: 50%; background: #fff; border: 0;
+  -webkit-appearance: none; width: 28px; height: 28px; margin-top: -10px; border: 0; border-radius: 50%; background: #fff;
   box-shadow: 0 0.5px 4px rgba(0, 0, 0, 0.12), 0 6px 13px rgba(0, 0, 0, 0.16); cursor: grab;
 }
 #time::-moz-range-thumb {
-  width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 0;
+  width: 28px; height: 28px; border: 0; border-radius: 50%; background: #fff;
   box-shadow: 0 0.5px 4px rgba(0, 0, 0, 0.12), 0 6px 13px rgba(0, 0, 0, 0.16); cursor: grab;
 }
-.ticks { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-2); margin-top: -8px; padding: 0 4px; }
-.status { font-size: 0.75rem; color: var(--text-2); min-height: 1rem; font-variant-numeric: tabular-nums; }
+#time:active::-webkit-slider-thumb { cursor: grabbing; }
+#time:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-control); }
+.ticks { display: flex; justify-content: space-between; margin-top: -10px; padding: 0 6px; font-size: 0.75rem; color: var(--text-2); }
+.status { min-height: 1rem; font-size: 0.75rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .status.err { color: var(--danger); }
 
-.maplibregl-marker { cursor: pointer; }
-.point-marker {
-  width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 3px solid #fff;
+/* Point mesuré : un repère de 18 px dans une zone de toucher de 44 px. */
+.maplibregl-marker { cursor: grab; }
+.point-marker { display: grid; place-items: center; width: 44px; height: 44px; }
+.point-marker::before {
+  content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: 3px solid #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
@@ -243,25 +297,29 @@ body {
   .btn:hover { background: var(--fill-2); }
   .icon-btn:hover { filter: brightness(1.08); }
   .search button:hover, .link:hover { opacity: 0.8; }
-  .results li:hover { background: var(--fill); }
+  .results li:hover, #map .maplibregl-ctrl-group button:not(:disabled):hover { background-color: var(--fill); }
 }
 
 @supports (height: 100dvh) {
-  .panel { max-height: calc(100dvh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - 16px); }
+  .panel { max-height: calc(100dvh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - 12px); }
 }
 
-/* ---------- Mobile ---------- */
+/* ---------- Mobile : le panneau devient une feuille posée sur la barre du temps ---------- */
 @media (max-width: 760px) {
   :root { --timebar-h: 150px; }
   .brand-sub, .brand-name { display: none; }
-  .brand { padding: 0; width: var(--hit); justify-content: center; }
+  .brand { width: var(--hit); padding: 0; justify-content: center; }
   .panel-toggle { display: inline-flex; }
   .panel {
-    top: auto; left: var(--safe-l); right: var(--safe-r); width: auto; bottom: var(--timebar-h);
-    max-height: min(55vh, 55dvh); padding: 0 10px; border-radius: 0;
-    transition: transform 0.25s ease, opacity 0.25s ease;
+    top: auto; left: 0; right: 0; bottom: var(--timebar-h); width: auto; max-height: min(55vh, 55dvh);
+    padding: 0 calc(16px + var(--safe-r)) 0 calc(16px + var(--safe-l));
+    border-radius: var(--r-surface) var(--r-surface) 0 0; box-shadow: inset 0 1px 0 var(--separator), 0 -8px 24px rgba(0, 0, 0, 0.12);
+    transition: transform 300ms var(--ease-out), opacity 300ms var(--ease-out);
   }
-  .panel.collapsed { transform: translateY(20px); opacity: 0; pointer-events: none; visibility: hidden; transition: transform 0.25s ease, opacity 0.25s ease, visibility 0s linear 0.25s; }
+  .panel.collapsed {
+    transform: translateY(24px); opacity: 0; pointer-events: none; visibility: hidden;
+    transition: transform 200ms ease-in, opacity 200ms ease-in, visibility 0s linear 200ms;
+  }
   /* Corps de texte à 16-17 px et champs à 17 px : sous 16 px, iOS zoome sur le champ touché. */
   .search input, .grid2 dd, .switch { font-size: 1.0625rem; }
   .hint, .exposure-list { font-size: 1rem; }
@@ -274,7 +332,8 @@ body {
   .time-row { gap: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .panel { transition: none; }
-  .btn, .icon-btn, .panel-toggle, .brand { transition: none; }
+  .panel, .panel.collapsed { transition: opacity 150ms linear, visibility 0s linear 150ms; transform: none; }
+  .panel:not(.collapsed) { transition: opacity 150ms linear; }
+  .seg::before, .switch input, .switch input::before, .btn, .icon-btn, .panel-toggle, .brand { transition: none; }
   .btn:active, .icon-btn:active, .panel-toggle:active, .brand:active { transform: none; opacity: 0.6; }
 }

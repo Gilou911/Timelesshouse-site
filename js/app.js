@@ -22,6 +22,8 @@ const ui = {
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
+// Sur téléphone, l'exemple de coordonnées ne tient pas dans le champ : un libellé court à la place.
+if (isMobile()) ui.searchInput.placeholder = 'Rechercher';
 const DEFAULT_VIEW = { lat: 48.8566, lng: 2.3522, zoom: 15.3 };
 
 // tz-lookup (lat/lng → fuseau IANA) : version embarquée dans vendor/ (chargée avant l'initialisation),
@@ -378,8 +380,7 @@ shadowMap.on('heightfield', (stats) => {
   }
   const parts = [];
   parts.push(`relief ${stats.tilesLoaded} tuile${stats.tilesLoaded > 1 ? 's' : ''}${stats.tilesMissing ? ` (${stats.tilesMissing} manquante${stats.tilesMissing > 1 ? 's' : ''})` : ''}`);
-  parts.push(`${stats.buildings} bâtiment${stats.buildings > 1 ? 's' : ''}`);
-  parts.push(`${stats.w}×${stats.h}`);
+  parts.push(`${stats.buildings.toLocaleString('fr-FR')} bâtiment${stats.buildings > 1 ? 's' : ''}`);
   setStatus(parts.join(' · '));
   if (state.point) computeExposure();
 });

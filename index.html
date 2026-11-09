@@ -23,13 +23,12 @@
       <span class="brand-name">Ombres</span>
       <span class="brand-sub">Timeless House</span>
     </a>
+    <!-- Champ de recherche à la manière d'iOS : la loupe signale le champ, Entrée lance la recherche. -->
     <form id="search" class="search" role="search" autocomplete="off">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <input id="search-input" type="search" placeholder="Lieu, adresse ou « 48.85, 2.35 »" aria-label="Rechercher un lieu" enterkeyhint="search">
-      <button type="submit" aria-label="Rechercher">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </button>
       <button type="button" id="locate" title="Ma position" aria-label="Ma position">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3 3 10.8l8.2 2 2 8.2z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       </button>
       <ul id="results" class="results" role="listbox" aria-label="Résultats de la recherche" aria-live="polite" hidden></ul>
     </form>
@@ -79,9 +78,9 @@
         <div class="legend-labels"><span>0 h</span><span id="legend-mid">—</span><span id="legend-max">—</span></div>
         <p class="hint">Heures de soleil direct reçues ce jour-là, en chaque point.</p>
       </div>
-      <label class="switch"><input type="checkbox" id="toggle-shadows" checked> <span>Ombres</span></label>
-      <label class="switch"><input type="checkbox" id="toggle-buildings" checked> <span>Bâtiments 3D</span></label>
-      <label class="switch"><input type="checkbox" id="toggle-terrain"> <span>Relief 3D</span></label>
+      <label class="switch"><span>Ombres</span><input type="checkbox" role="switch" id="toggle-shadows" checked></label>
+      <label class="switch"><span>Bâtiments 3D</span><input type="checkbox" role="switch" id="toggle-buildings" checked></label>
+      <label class="switch"><span>Relief 3D</span><input type="checkbox" role="switch" id="toggle-terrain"></label>
       <div class="seg" role="radiogroup" aria-label="Fond de carte">
         <label><input type="radio" name="style" value="plan" checked><span>Plan</span></label>
         <label><input type="radio" name="style" value="satellite"><span>Satellite</span></label>
@@ -93,7 +92,7 @@
 
     <section class="card">
       <div class="row">
-        <button type="button" id="share" class="btn">Copier le lien</button>
+        <button type="button" id="share" class="btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Copier le lien</button>
         <span id="share-ok" class="ok" hidden>Lien copié</span>
       </div>
       <p class="fineprint">Ombres calculées à partir du relief (Terrain Tiles) et des hauteurs de bâtiments OpenStreetMap. Précision indicative : quelques mètres.</p>
