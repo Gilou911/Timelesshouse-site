@@ -28,7 +28,7 @@ function satelliteStyle() {
         tileSize: 256,
         maxzoom: 19,
         attribution:
-          'Imagerie © <a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a>, Maxar, Earthstar Geographics, GIS User Community',
+          'Powered by <a href="https://www.esri.com/" target="_blank" rel="noopener">Esri</a> — Source : Esri, Vantor, Earthstar Geographics, and the GIS User Community',
       },
       openmaptiles: { type: 'vector', url: `${OFM}/planet`, attribution: OFM_ATTRIBUTION },
     },
@@ -536,6 +536,7 @@ export class ShadowMap {
         this.currentGridId = msg.id;
         src.setCoordinates(this._gridCorners(grid));
       }
+      this._flushTerrainCache();
       this.map.triggerRepaint();
       this.map.once('render', () => src.pause());
     }
@@ -544,6 +545,17 @@ export class ShadowMap {
       this.sunDirty = false;
       this._requestRender();
     }
+  }
+
+  /**
+   * Avec le relief 3D, MapLibre drape les couches 2D dans des textures mises en cache par tuile de relief ;
+   * une mise à jour du canvas ne les invalide pas. On vide ce cache nous-mêmes (API interne, version épinglée).
+   */
+  _flushTerrainCache() {
+    const terrain = this.map.terrain;
+    if (!terrain) return;
+    const tm = terrain.tileManager || terrain.sourceCache;
+    if (tm && typeof tm.freeRtt === 'function') tm.freeRtt();
   }
 
   _requestRender() {

@@ -32,9 +32,9 @@ Exemples de configuration si vous servez vous-même :
 location /ombres/ {
     alias /var/www/ombres/;
     try_files $uri $uri/ /ombres/index.html;
-    location ~* \.(js|css|svg|webmanifest)$ { add_header Cache-Control "public, max-age=86400"; }
-    location ~* ^/ombres/vendor/ { add_header Cache-Control "public, max-age=31536000, immutable"; }
 }
+# Les fichiers de vendor/ sont référencés avec ?v=<version> : ils peuvent être mis en cache longtemps.
+location ^~ /ombres/vendor/ { alias /var/www/ombres/vendor/; add_header Cache-Control "public, max-age=31536000, immutable"; }
 ```
 
 ```caddyfile
@@ -54,8 +54,10 @@ Le dépôt contient un workflow `.github/workflows/deploy-pages.yml` :
 
 1. Dans GitHub → Settings → Pages, choisissez **Source : GitHub Actions**.
 2. Fusionnez sur `main` : le workflow lance les tests puis publie le site.
-3. Pour un domaine personnalisé (par exemple `ombres.timelesshouse.org`), décommentez la ligne `CNAME` du workflow,
-   puis ajoutez chez votre registrar un enregistrement `CNAME ombres → gilou911.github.io` et cochez « Enforce HTTPS ».
+3. Pour un domaine personnalisé (par exemple `ombres.timelesshouse.org`) : ajoutez chez votre registrar un enregistrement
+   `CNAME ombres → gilou911.github.io`, saisissez ce domaine dans Settings → Pages → *Custom domain*, puis cochez
+   « Enforce HTTPS » une fois le certificat émis (jusqu'à une heure). Avec un déploiement par GitHub Actions, un fichier
+   `CNAME` dans le site n'est pas nécessaire : c'est le réglage dans Settings qui compte.
 
 Un domaine personnalisé GitHub Pages occupe tout le nom d'hôte : si `perso.timelesshouse.org` est déjà servi par une
 autre application, il faut soit l'option A, soit un autre sous-domaine.
@@ -94,10 +96,10 @@ serveur statique (`npx serve .`, `python3 -m http.server`) pour la version compl
 | Donnée | Source | Licence / conditions |
 | --- | --- | --- |
 | Fond de carte « Plan » et bâtiments | [OpenFreeMap](https://openfreemap.org) (OpenMapTiles, données © OpenStreetMap) | Gratuit, sans clé, attribution affichée |
-| Fond « Satellite » | Esri World Imagery | Attribution Esri affichée, usage non commercial / raisonnable |
+| Fond « Satellite » | Esri World Imagery | Attribution Esri affichée. Esri ne documente pas clairement l'usage sans clé dans une app publique : pour un usage intensif ou commercial, prévoir une clé ArcGIS ou une autre source (ex. Sentinel-2 cloudless d'EOX, CC BY-NC-SA, zoom ≤ 14) |
 | Relief | [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) sur AWS Open Data (Mapzen : SRTM, EU-DEM, etc.) | Ouvert, attribution affichée |
 | Recherche de lieu | [Nominatim](https://nominatim.org) | Usage léger : une requête par recherche validée, jamais d'autocomplétion |
-| Fuseaux horaires | [tz-lookup](https://github.com/darkskyapp/tz-lookup) (CC0), embarqué dans `vendor/` | — |
+| Fuseaux horaires | [@photostructure/tz-lookup](https://github.com/photostructure/tz-lookup) (CC0, données tz 2025), embarqué dans `vendor/` | — |
 | Carte | [MapLibre GL JS](https://maplibre.org) 5, embarqué dans `vendor/` | BSD-3 |
 
 Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFreeMap documente l'auto-hébergement) ou

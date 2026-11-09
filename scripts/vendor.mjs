@@ -14,17 +14,17 @@ copyFileSync(join(ml, 'dist', 'maplibre-gl.js'), join(out, 'maplibre-gl.js'));
 copyFileSync(join(ml, 'dist', 'maplibre-gl.css'), join(out, 'maplibre-gl.css'));
 copyFileSync(join(ml, 'LICENSE.txt'), join(out, 'LICENSE-maplibre-gl.txt'));
 
-const tz = join(nm, 'tz-lookup');
+const tz = join(nm, '@photostructure', 'tz-lookup');
 const tzPkg = JSON.parse(readFileSync(join(tz, 'package.json'), 'utf8'));
 const tzSrc = readFileSync(join(tz, 'tz.js'), 'utf8');
 writeFileSync(
   join(out, 'tz-lookup.js'),
-  `// tz-lookup ${tzPkg.version} (CC0-1.0) — https://github.com/darkskyapp/tz-lookup — enveloppé en module ES.\n${tzSrc}\nexport default tzlookup;\n`,
+  `// @photostructure/tz-lookup ${tzPkg.version} (CC0-1.0) — https://github.com/photostructure/tz-lookup — enveloppé en module ES.\n${tzSrc}\nexport default tzlookup;\n`,
 );
 copyFileSync(join(tz, 'LICENSE'), join(out, 'LICENSE-tz-lookup.txt'));
 
 writeFileSync(
   join(out, 'VERSIONS.txt'),
-  `maplibre-gl ${mlPkg.version}\ntz-lookup ${tzPkg.version}\n`,
+  `maplibre-gl ${mlPkg.version}\n@photostructure/tz-lookup ${tzPkg.version}\n`,
 );
-console.log(`vendor/ : maplibre-gl ${mlPkg.version}, tz-lookup ${tzPkg.version}`);
+console.log(`vendor/ : maplibre-gl ${mlPkg.version}, @photostructure/tz-lookup ${tzPkg.version}`);

@@ -127,16 +127,18 @@ export function timesForZenith(noonUTC, lat, lng, zenith) {
     const haR = Math.acos(argR) * DEG;
     const haS = Math.acos(argS) * DEG;
     const dayStart = Date.UTC(noonUTC.getUTCFullYear(), noonUTC.getUTCMonth(), noonUTC.getUTCDate());
-    // Minutes UTC depuis minuit UTC du jour de référence (peut déborder : on s'aligne sur le midi solaire local).
-    const noonMin = 720 - 4 * lng - pr.eqTime;
-    let riseMin = noonMin - 4 * haR;
-    let setMin = 720 - 4 * lng - ps.eqTime + 4 * haS;
-    // Ramener autour du midi local fourni.
+    // Minutes UTC depuis minuit UTC du jour de référence. On ramène d'abord le MIDI SOLAIRE à moins de 12 h du midi
+    // civil fourni, puis on en déduit lever et coucher sans autre repliement : un coucher peut tomber plus de 12 h
+    // après le midi civil (jours très longs + fuseau décalé, ex. Nome en Alaska) sans être rejeté d'un jour.
     const refMin = (noonUTC.getTime() - dayStart) / 60000;
-    while (riseMin - refMin > 720) riseMin -= 1440;
-    while (riseMin - refMin < -720) riseMin += 1440;
-    while (setMin - refMin > 720) setMin -= 1440;
-    while (setMin - refMin < -720) setMin += 1440;
+    let noonR = 720 - 4 * lng - pr.eqTime;
+    while (noonR - refMin > 720) noonR -= 1440;
+    while (noonR - refMin < -720) noonR += 1440;
+    let noonS = 720 - 4 * lng - ps.eqTime;
+    while (noonS - refMin > 720) noonS -= 1440;
+    while (noonS - refMin < -720) noonS += 1440;
+    const riseMin = noonR - 4 * haR;
+    const setMin = noonS + 4 * haS;
     tRise = new Date(dayStart + riseMin * 60000);
     tSet = new Date(dayStart + setMin * 60000);
   }

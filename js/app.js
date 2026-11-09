@@ -152,7 +152,11 @@ function refreshDay() {
   if (day.status === 'polar-day') bg = dayc;
   else if (day.status === 'polar-night') bg = night;
   else {
-    bg = `linear-gradient(90deg, ${night} 0%, ${night} ${pct(day.civilDawn, 0)}, ${dawn} ${pct(day.sunrise, 0)}, ${dayc} ${pct(day.goldenMorningEnd, 0)}, ${dayc} ${pct(day.goldenEveningStart, 1440)}, ${dawn} ${pct(day.sunset, 1440)}, ${night} ${pct(day.civilDusk, 1440)}, ${night} 100%)`;
+    // Soleil jamais au-dessus de +6° : la « journée » reste dorée (repères au midi solaire) ;
+    // jamais sous −6° (nuits blanches) : le crépuscule civil s'étend jusqu'aux bornes du jour.
+    const gMorning = day.goldenMorningEnd || day.solarNoon;
+    const gEvening = day.goldenEveningStart || day.solarNoon;
+    bg = `linear-gradient(90deg, ${night} 0%, ${night} ${pct(day.civilDawn, 0)}, ${dawn} ${pct(day.sunrise, 0)}, ${dayc} ${pct(gMorning, 0)}, ${dayc} ${pct(gEvening, 1440)}, ${dawn} ${pct(day.sunset, 1440)}, ${night} ${pct(day.civilDusk, 1440)}, ${night} 100%)`;
   }
   ui.time.style.background = bg;
 

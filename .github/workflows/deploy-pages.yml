@@ -30,8 +30,7 @@ jobs:
         run: |
           mkdir -p _site
           cp -r index.html manifest.webmanifest assets css js vendor _site/
-          # Domaine personnalisé (optionnel) : décommentez et adaptez.
-          # echo "ombres.timelesshouse.org" > _site/CNAME
+          # Domaine personnalisé : à régler dans Settings → Pages → Custom domain (pas de fichier CNAME ici).
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

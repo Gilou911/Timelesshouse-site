@@ -81,6 +81,7 @@ async function setTime(page, minutes) {
 }
 
 async function scenario(name, fn) {
+  if (process.env.ONLY && !name.includes(process.env.ONLY)) return;
   try {
     await fn();
     console.log(`✓ ${name}`);
@@ -162,6 +163,33 @@ await scenario('Chamonix : ombres de relief au solstice d\'hiver, relief 3D', as
   const terrain = await page.evaluate(() => !!window.__ombres.shadowMap.map.getTerrain());
   assert.ok(terrain, 'terrain activé');
   await page.screenshot({ path: join(OUT, 'chamonix-3d.png') });
+  // Avec le relief 3D, l'overlay drapé doit continuer à se mettre à jour quand l'heure change (cache render-to-texture).
+  // Luminosité moyenne de la carte, lue pendant l'événement « render » (le tampon WebGL n'est pas conservé après).
+  const pixelsAt = () => page.evaluate(() => new Promise((resolve) => {
+    const m = window.__ombres.shadowMap.map;
+    m.once('render', () => {
+      const gl = m.getCanvas().getContext('webgl2') || m.getCanvas().getContext('webgl');
+      const w = gl.drawingBufferWidth;
+      const h = gl.drawingBufferHeight;
+      const buf = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      let sum = 0;
+      let n = 0;
+      for (let i = 0; i < buf.length; i += 4 * 61) {
+        sum += buf[i] + buf[i + 1] + buf[i + 2];
+        n++;
+      }
+      resolve(sum / n);
+    });
+    m.triggerRepaint();
+  }));
+  await setTime(page, 9 * 60 + 30);
+  await page.waitForTimeout(800);
+  const bright0930 = await pixelsAt();
+  await setTime(page, 13 * 60);
+  await page.waitForTimeout(800);
+  const bright1300 = await pixelsAt();
+  assert.ok(bright1300 > bright0930 + 2, `l'écran doit s'éclaircir à 13h avec le relief 3D (9h30 : ${bright0930.toFixed(1)}, 13h : ${bright1300.toFixed(1)})`);
   await context.close();
 });
 

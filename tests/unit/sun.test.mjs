@@ -67,3 +67,26 @@ test('longueur d\'ombre et réfraction', () => {
   assert.ok(Math.abs(refraction(0) - 0.4819) < 0.01, `réfraction horizon ${refraction(0)}`);
   assert.equal(refraction(89), 0);
 });
+
+test('jour très long avec fuseau décalé (Nome, Alaska) : coucher après lever, ~21 h de jour', () => {
+  // Midi civil du 21 juin 2026 à Nome (UTC−8 en été) = 20:00 UTC ; le midi solaire est vers 14:00 heure locale.
+  const noonUTC = new Date('2026-06-21T20:00:00Z');
+  const d = dayInfo(noonUTC, 64.5011, -165.4064);
+  assert.equal(d.status, 'normal');
+  assert.ok(d.sunset > d.sunrise, `coucher ${d.sunset.toISOString()} après lever ${d.sunrise.toISOString()}`);
+  assert.ok(d.dayLengthMinutes > 20.5 * 60 && d.dayLengthMinutes < 22 * 60, `durée ${d.dayLengthMinutes}`);
+  // Le coucher (≈ 01:45 locale le 22) est plus de 12 h après le midi civil : il ne doit pas être renvoyé la veille.
+  assert.ok(d.sunset.getTime() - noonUTC.getTime() > 12 * 3600000, 'coucher > 12 h après le midi civil');
+  // Midi solaire ≈ 12:00 UTC + 165,4°/15 = 23:02 UTC (15:02 heure locale).
+  assert.ok(Math.abs(d.solarNoon.getTime() - new Date('2026-06-21T23:02:00Z').getTime()) < 10 * 60000, `midi solaire ${d.solarNoon.toISOString()}`);
+});
+
+test('Auckland en été (UTC+13) : le jour civil chevauche deux jours UTC', () => {
+  const noonUTC = new Date('2026-01-14T23:00:00Z'); // 15 janv. 12:00 NZDT
+  const d = dayInfo(noonUTC, -36.8485, 174.7633);
+  const riseLocalMin = ((d.sunrise.getTime() + 13 * 3600000) % 86400000) / 60000;
+  const setLocalMin = ((d.sunset.getTime() + 13 * 3600000) % 86400000) / 60000;
+  assert.ok(Math.abs(riseLocalMin - (6 * 60 + 16)) <= 5, `lever local ${riseLocalMin}`);
+  assert.ok(Math.abs(setLocalMin - (20 * 60 + 40)) <= 5, `coucher local ${setLocalMin}`);
+  assert.ok(d.sunset > d.sunrise);
+});

@@ -11,7 +11,7 @@
     "vendor": "node scripts/vendor.mjs"
   },
   "devDependencies": {
-    "maplibre-gl": "5.24.0",
-    "tz-lookup": "^6.1.25"
+    "@photostructure/tz-lookup": "^11.8.0",
+    "maplibre-gl": "5.24.0"
   }
 }
