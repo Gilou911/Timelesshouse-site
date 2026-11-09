@@ -1,16 +1,22 @@
-# Si vendor/maplibre-gl.js manque sur la branche (dépôt poussé sans les fichiers minifiés),
+# Si shadowmap/vendor/maplibre-gl.js manque sur la branche (dépôt poussé sans les fichiers minifiés),
 # ce workflow le régénère depuis package-lock.json et le commet. Nécessite dans Settings → Actions →
-# General → Workflow permissions : « Read and write permissions ». Sinon, lancez `npm run vendor` en local.
+# General → Workflow permissions : « Read and write permissions ». Sinon, lancez `npm run vendor` en local,
+# depuis shadowmap/.
 name: Vendor
 
 on:
   push:
     paths-ignore:
-      - 'vendor/**'
+      - 'shadowmap/vendor/**'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# L'application vit dans shadowmap/ : toutes les commandes s'y exécutent.
+defaults:
+  run:
+    working-directory: shadowmap
 
 jobs:
   vendor:

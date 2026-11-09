@@ -5,6 +5,11 @@ on:
   push:
     branches-ignore: [main]
 
+# L'application vit dans shadowmap/ : toutes les commandes s'y exécutent.
+defaults:
+  run:
+    working-directory: shadowmap
+
 jobs:
   unit:
     runs-on: ubuntu-latest

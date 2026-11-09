@@ -16,6 +16,11 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# L'application vit dans shadowmap/ : toutes les commandes s'y exécutent.
+defaults:
+  run:
+    working-directory: shadowmap
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,7 +40,7 @@ jobs:
           # Domaine personnalisé : à régler dans Settings → Pages → Custom domain (pas de fichier CNAME ici).
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: shadowmap/_site
   deploy:
     needs: build
     runs-on: ubuntu-latest
