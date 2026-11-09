@@ -1,0 +1,17 @@
+{
+  "name": "timelesshouse-ombres",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ombres — carte du soleil et des ombres (terrain + bâtiments) pour perso.timelesshouse.org",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:e2e": "node tests/e2e/run.mjs",
+    "serve": "node tests/e2e/server.mjs",
+    "vendor": "node scripts/vendor.mjs"
+  },
+  "devDependencies": {
+    "maplibre-gl": "5.24.0",
+    "tz-lookup": "^6.1.25"
+  }
+}

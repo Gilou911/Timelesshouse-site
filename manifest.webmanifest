@@ -1,0 +1,12 @@
+{
+  "name": "Ombres — Timeless House",
+  "short_name": "Ombres",
+  "description": "Course du soleil et ombres du relief et des bâtiments, à toute date et heure.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101828",
+  "theme_color": "#101828",
+  "lang": "fr",
+  "icons": [{ "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

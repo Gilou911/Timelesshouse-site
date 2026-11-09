@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ombres · soleil et ombres sur la carte — Timeless House</title>
+  <meta name="description" content="Visualisez la course du soleil et les ombres du relief et des bâtiments à n'importe quelle date et heure, partout dans le monde.">
+  <meta name="theme-color" content="#101828">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon.svg">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="map" role="application" aria-label="Carte des ombres"></div>
+
+  <header class="topbar">
+    <a class="brand" href="./" title="Ombres — Timeless House">
+      <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="13" r="6" fill="#ffd23f"/><g stroke="#ffd23f" stroke-width="2" stroke-linecap="round"><path d="M16 2v3M16 21v3M5 13h3M24 13h3M8.2 5.2l2.1 2.1M21.7 18.7l2.1 2.1M8.2 20.8l2.1-2.1M21.7 7.3l2.1-2.1"/></g><path d="M4 29c6-3 18-3 24 0" stroke="#1a2340" stroke-width="3" stroke-linecap="round" fill="none"/></svg>
+      <span class="brand-name">Ombres</span>
+      <span class="brand-sub">Timeless House</span>
+    </a>
+    <form id="search" class="search" role="search" autocomplete="off">
+      <input id="search-input" type="search" placeholder="Lieu, adresse ou « 48.85, 2.35 »" aria-label="Rechercher un lieu" enterkeyhint="search">
+      <button type="submit" aria-label="Rechercher">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button type="button" id="locate" title="Ma position" aria-label="Ma position">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <ul id="results" class="results" hidden></ul>
+    </form>
+    <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="true" aria-controls="panel" title="Afficher ou masquer le panneau">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></g></svg>
+      <span>Soleil</span>
+    </button>
+  </header>
+
+  <aside id="panel" class="panel" aria-label="Informations et réglages">
+    <section class="card">
+      <h2>Soleil</h2>
+      <div class="phase" id="phase">—</div>
+      <dl class="grid2">
+        <div><dt>Azimut</dt><dd id="azimuth">—</dd></div>
+        <div><dt>Élévation</dt><dd id="altitude">—</dd></div>
+        <div><dt>Lever</dt><dd id="sunrise">—</dd></div>
+        <div><dt>Coucher</dt><dd id="sunset">—</dd></div>
+        <div><dt>Midi solaire</dt><dd id="noon">—</dd></div>
+        <div><dt>Durée du jour</dt><dd id="daylength">—</dd></div>
+        <div><dt>Heure dorée</dt><dd id="golden">—</dd></div>
+        <div><dt>Ombre</dt><dd id="shadow-ratio">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>Ensoleillement d'un point</h2>
+      <p class="hint" id="exposure-hint">Cliquez sur la carte pour mesurer combien d'heures de soleil reçoit un endroit ce jour-là.</p>
+      <div id="exposure" class="exposure" hidden>
+        <div class="exposure-total"><span id="exposure-hours">—</span><small>de soleil direct</small></div>
+        <ul id="exposure-list" class="exposure-list"></ul>
+        <div class="exposure-bar" id="exposure-bar" aria-hidden="true"></div>
+        <div class="row">
+          <small id="exposure-meta"></small>
+          <button type="button" id="exposure-clear" class="link">Retirer le point</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Couches</h2>
+      <label class="switch"><input type="checkbox" id="toggle-shadows" checked> <span>Ombres</span></label>
+      <label class="switch"><input type="checkbox" id="toggle-buildings" checked> <span>Bâtiments 3D</span></label>
+      <label class="switch"><input type="checkbox" id="toggle-terrain"> <span>Relief 3D</span></label>
+      <div class="seg" role="radiogroup" aria-label="Fond de carte">
+        <label><input type="radio" name="style" value="plan" checked><span>Plan</span></label>
+        <label><input type="radio" name="style" value="satellite"><span>Satellite</span></label>
+      </div>
+      <label class="range-label">Intensité des ombres
+        <input type="range" id="opacity" min="0.15" max="0.85" step="0.05" value="0.45">
+      </label>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <button type="button" id="share" class="btn">Copier le lien</button>
+        <span id="share-ok" class="ok" hidden>Lien copié</span>
+      </div>
+      <p class="fineprint">Ombres calculées à partir du relief (Terrain Tiles) et des hauteurs de bâtiments OpenStreetMap. Précision indicative : quelques mètres.</p>
+    </section>
+  </aside>
+
+  <footer class="timebar" aria-label="Date et heure">
+    <div class="time-row">
+      <button type="button" id="play" class="icon-btn" aria-label="Lecture" title="Animer la journée (espace)">
+        <svg class="ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z" fill="currentColor"/></svg>
+        <svg class="ic-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
+      </button>
+      <input type="date" id="date" aria-label="Date">
+      <div class="clock">
+        <span id="time-label" class="time-label">—</span>
+        <span id="tz-label" class="tz-label">—</span>
+      </div>
+      <button type="button" id="now" class="btn small">Maintenant</button>
+    </div>
+    <div class="slider-row">
+      <input type="range" id="time" min="0" max="1439" step="1" value="720" aria-label="Heure de la journée">
+      <div class="ticks" aria-hidden="true"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+  </footer>
+
+  <script src="vendor/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

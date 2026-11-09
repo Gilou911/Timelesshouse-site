@@ -1,0 +1,519 @@
+// Interface « Ombres » : date/heure, recherche, panneau soleil, ensoleillement d'un point, état dans l'URL.
+import { ShadowMap, STYLES } from './map.js';
+import { sunPosition, dayInfo, lightPhase, shadowLength } from './sun.js';
+import {
+  browserTimeZone, isValidTimeZone, wallToUTC, minutesOfDay, tzLabel, formatMinutes, formatTime, formatDateISO, formatDuration,
+} from './tz.js';
+import tzlookup from '../vendor/tz-lookup.js';
+import { parseHash, buildHash } from './state.js';
+import { searchPlace } from './geocode.js';
+
+const $ = (id) => document.getElementById(id);
+const ui = {
+  search: $('search'), searchInput: $('search-input'), results: $('results'), locate: $('locate'),
+  panel: $('panel'), panelToggle: $('panel-toggle'),
+  phase: $('phase'), azimuth: $('azimuth'), altitude: $('altitude'), sunrise: $('sunrise'), sunset: $('sunset'),
+  noon: $('noon'), daylength: $('daylength'), golden: $('golden'), shadowRatio: $('shadow-ratio'),
+  exposureHint: $('exposure-hint'), exposure: $('exposure'), exposureHours: $('exposure-hours'), exposureList: $('exposure-list'),
+  exposureBar: $('exposure-bar'), exposureMeta: $('exposure-meta'), exposureClear: $('exposure-clear'),
+  toggleShadows: $('toggle-shadows'), toggleBuildings: $('toggle-buildings'), toggleTerrain: $('toggle-terrain'),
+  opacity: $('opacity'), share: $('share'), shareOk: $('share-ok'),
+  play: $('play'), date: $('date'), timeLabel: $('time-label'), tzLabel: $('tz-label'), now: $('now'), time: $('time'), status: $('status'),
+};
+
+const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
+const DEFAULT_VIEW = { lat: 48.8566, lng: 2.3522, zoom: 15.3 };
+
+function tzFor(lat, lng) {
+  try {
+    const tz = tzlookup(lat, lng);
+    return isValidTimeZone(tz) ? tz : browserTimeZone();
+  } catch {
+    return browserTimeZone();
+  }
+}
+
+// ---------- État ----------
+const hash = parseHash(location.hash);
+const lat0 = hash.lat ?? DEFAULT_VIEW.lat;
+const lng0 = hash.lng ?? DEFAULT_VIEW.lng;
+const state = {
+  tz: isValidTimeZone(hash.tz) ? hash.tz : tzFor(lat0, lng0),
+  tzAuto: !isValidTimeZone(hash.tz),
+  date: '',
+  minutes: 720,
+  style: STYLES[hash.style] ? hash.style : 'plan',
+  buildings3d: hash.buildings3d ?? true,
+  terrain: hash.terrain ?? false,
+  shadows: hash.shadows ?? true,
+  opacity: 0.45,
+  point: hash.point || null,
+  playing: false,
+  speed: 2,
+};
+{
+  const now = new Date();
+  state.date = hash.date || formatDateISO(state.tz, now);
+  if (hash.time) {
+    const [h, m] = hash.time.split(':').map(Number);
+    state.minutes = Math.max(0, Math.min(1439, h * 60 + m));
+  } else {
+    state.minutes = Math.floor(minutesOfDay(state.tz, now));
+  }
+}
+
+function dateParts() {
+  const [y, mo, d] = state.date.split('-').map(Number);
+  return { y, mo, d };
+}
+function instant() {
+  const { y, mo, d } = dateParts();
+  return wallToUTC(state.tz, y, mo, d, Math.floor(state.minutes / 60), state.minutes % 60);
+}
+function noonUTC() {
+  const { y, mo, d } = dateParts();
+  return wallToUTC(state.tz, y, mo, d, 12, 0);
+}
+function minutesInDay(date) {
+  // Minutes depuis minuit (heure civile) pour un instant du jour sélectionné ; null si absent.
+  if (!date) return null;
+  const sameDay = formatDateISO(state.tz, date) === state.date;
+  const m = minutesOfDay(state.tz, date);
+  return sameDay ? m : m + (date > noonUTC() ? 1440 : -1440);
+}
+
+// ---------- Carte ----------
+const shadowMap = new ShadowMap('map', {
+  lat: lat0,
+  lng: lng0,
+  zoom: hash.zoom ?? DEFAULT_VIEW.zoom,
+  bearing: hash.bearing || 0,
+  pitch: hash.pitch || 0,
+  style: state.style,
+  buildings3d: state.buildings3d,
+  terrain: state.terrain,
+  shadows: state.shadows,
+  opacity: state.opacity,
+  cellBudget: isMobile() ? 600000 : 1200000,
+});
+const map = shadowMap.map;
+let marker = null;
+let day = null; // dayInfo courant
+let hourPositions = [];
+const debug = { frames: 0, stats: null, lastExposure: null, state, shadowMap };
+window.__ombres = debug;
+
+// ---------- Soleil ----------
+const CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+function cardinal(az) {
+  return CARDINALS[Math.round((((az % 360) + 360) % 360) / 45) % 8];
+}
+function fmtDeg(v, digits = 0) {
+  return `${v.toFixed(digits).replace('.', ',')}°`;
+}
+
+function focusLngLat() {
+  if (state.point) return { lng: state.point.lng, lat: state.point.lat };
+  const c = map.getCenter();
+  return { lng: c.lng, lat: c.lat };
+}
+
+function refreshDay() {
+  const c = focusLngLat();
+  day = dayInfo(noonUTC(), c.lat, c.lng);
+  const t = (d) => (d ? formatTime(state.tz, d) : '—');
+  if (day.status === 'polar-day') {
+    ui.sunrise.textContent = 'jour polaire';
+    ui.sunset.textContent = 'jour polaire';
+  } else if (day.status === 'polar-night') {
+    ui.sunrise.textContent = 'nuit polaire';
+    ui.sunset.textContent = 'nuit polaire';
+  } else {
+    ui.sunrise.textContent = t(day.sunrise);
+    ui.sunset.textContent = t(day.sunset);
+  }
+  ui.noon.textContent = `${t(day.solarNoon)} (${fmtDeg(day.noonAltitude, 1)})`;
+  ui.daylength.textContent = formatDuration(day.dayLengthMinutes);
+  ui.golden.textContent =
+    day.goldenMorningEnd && day.goldenEveningStart ? `≤ ${t(day.goldenMorningEnd)} · ≥ ${t(day.goldenEveningStart)}` : '—';
+
+  // Dégradé du curseur : nuit / crépuscule / jour.
+  const pct = (d, fallback) => {
+    const m = minutesInDay(d);
+    return `${(((m == null ? fallback : m) / 1440) * 100).toFixed(2)}%`;
+  };
+  const night = '#1a2340';
+  const dawn = '#f5a623';
+  const dayc = '#ffd23f';
+  let bg;
+  if (day.status === 'polar-day') bg = dayc;
+  else if (day.status === 'polar-night') bg = night;
+  else {
+    bg = `linear-gradient(90deg, ${night} 0%, ${night} ${pct(day.civilDawn, 0)}, ${dawn} ${pct(day.sunrise, 0)}, ${dayc} ${pct(day.goldenMorningEnd, 0)}, ${dayc} ${pct(day.goldenEveningStart, 1440)}, ${dawn} ${pct(day.sunset, 1440)}, ${night} ${pct(day.civilDusk, 1440)}, ${night} 100%)`;
+  }
+  ui.time.style.background = bg;
+
+  // Positions horaires pour le tracé.
+  hourPositions = [];
+  const { y, mo, d } = dateParts();
+  for (let h = 0; h < 24; h++) {
+    const p = sunPosition(wallToUTC(state.tz, y, mo, d, h, 0), c.lat, c.lng);
+    hourPositions.push({ label: `${h}h`, azimuth: p.azimuth, altitude: p.altitude });
+  }
+}
+
+function refreshSun() {
+  const c = focusLngLat();
+  const center = map.getCenter();
+  const t = instant();
+  const posCenter = sunPosition(t, center.lat, center.lng);
+  shadowMap.setSun(posCenter.azimuth, posCenter.altitude);
+  const pos = state.point ? sunPosition(t, c.lat, c.lng) : posCenter;
+  const phase = lightPhase(pos.altitude);
+  ui.phase.textContent = phase.label;
+  ui.azimuth.textContent = `${fmtDeg(pos.azimuth)} ${cardinal(pos.azimuth)}`;
+  ui.altitude.textContent = pos.altitude > 0 ? fmtDeg(pos.altitude, 1) : `${fmtDeg(pos.altitude, 1)} (sous l'horizon)`;
+  const ratio = shadowLength(1, pos.altitude);
+  ui.shadowRatio.textContent = isFinite(ratio) ? `${ratio >= 100 ? '> 100' : ratio.toFixed(1).replace('.', ',')} × la hauteur` : 'aucune (nuit)';
+  ui.timeLabel.textContent = formatMinutes(state.minutes);
+  ui.tzLabel.textContent = `${tzLabel(state.tz, t)} · ${state.tz.replace(/_/g, ' ')}`;
+  ui.time.value = String(state.minutes);
+  ui.date.value = state.date;
+  shadowMap.setSunPath(c, hourPositions, { azimuth: pos.azimuth, altitude: pos.altitude });
+}
+
+function refreshAll() {
+  refreshDay();
+  refreshSun();
+  scheduleHash();
+}
+
+// ---------- Ensoleillement d'un point ----------
+function setPoint(lngLat) {
+  state.point = lngLat ? { lat: lngLat.lat, lng: lngLat.lng } : null;
+  if (marker) {
+    marker.remove();
+    marker = null;
+  }
+  if (state.point) {
+    const elm = document.createElement('div');
+    elm.className = 'point-marker';
+    marker = new maplibregl.Marker({ element: elm, draggable: true }).setLngLat([state.point.lng, state.point.lat]).addTo(map);
+    marker.on('dragend', () => setPoint(marker.getLngLat()));
+    ui.exposure.hidden = false;
+    ui.exposureHint.hidden = true;
+    computeExposure();
+  } else {
+    ui.exposure.hidden = true;
+    ui.exposureHint.hidden = false;
+  }
+  refreshAll();
+}
+
+let exposureSeq = 0;
+async function computeExposure() {
+  if (!state.point) return;
+  const seq = ++exposureSeq;
+  const { y, mo, d } = dateParts();
+  const step = 5;
+  const samples = [];
+  for (let m = 0; m < 1440; m += step) {
+    const p = sunPosition(wallToUTC(state.tz, y, mo, d, Math.floor(m / 60), m % 60), state.point.lat, state.point.lng);
+    samples.push({ azimuth: p.azimuth, altitude: p.altitude });
+  }
+  ui.exposureHours.textContent = '…';
+  ui.exposureList.innerHTML = '';
+  const res = await shadowMap.exposureAt(state.point, samples, 1.5);
+  if (seq !== exposureSeq) return;
+  debug.lastExposure = res;
+  if (!res || !res.lit) {
+    ui.exposureHours.textContent = '—';
+    ui.exposureList.innerHTML = '<li>Point hors de la zone calculée : recentrez la carte dessus.</li>';
+    ui.exposureBar.innerHTML = '';
+    ui.exposureMeta.textContent = '';
+    return;
+  }
+  const lit = res.lit;
+  const intervals = [];
+  let litMin = 0;
+  let start = -1;
+  for (let i = 0; i <= lit.length; i++) {
+    const on = i < lit.length && lit[i] === 1;
+    if (on) litMin += step;
+    if (on && start < 0) start = i * step;
+    if (!on && start >= 0) {
+      intervals.push([start, i * step]);
+      start = -1;
+    }
+  }
+  ui.exposureHours.textContent = formatDuration(litMin);
+  ui.exposureList.innerHTML = intervals.length
+    ? intervals.map(([a, b]) => `<li>de ${formatMinutes(a)} à ${formatMinutes(b)}</li>`).join('')
+    : '<li>Aucun soleil direct ce jour-là.</li>';
+  ui.exposureBar.innerHTML = '';
+  let cursor = 0;
+  for (const [a, b] of intervals) {
+    const gap = document.createElement('i');
+    gap.style.width = `${((a - cursor) / 1440) * 100}%`;
+    gap.style.background = 'transparent';
+    ui.exposureBar.appendChild(gap);
+    const seg = document.createElement('i');
+    seg.style.width = `${((b - a) / 1440) * 100}%`;
+    ui.exposureBar.appendChild(seg);
+    cursor = b;
+  }
+  const alt = res.elevation != null ? `altitude ${Math.round(res.elevation)} m` : '';
+  const roof = res.surface != null && res.elevation != null && res.surface - res.elevation > 1 ? ` · sur un toit (${Math.round(res.surface - res.elevation)} m)` : '';
+  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à 1,5 m du sol`;
+}
+
+// ---------- Événements carte ----------
+let dragging = false;
+map.on('dragstart', () => (dragging = true));
+map.on('dragend', () => setTimeout(() => (dragging = false), 50));
+map.on('click', (e) => {
+  if (dragging) return;
+  const target = e.originalEvent && e.originalEvent.target;
+  if (target && target.closest && target.closest('.maplibregl-marker')) return;
+  setPoint(e.lngLat);
+});
+map.on('moveend', () => {
+  const c = map.getCenter();
+  if (state.tzAuto) {
+    const tz = tzFor(c.lat, c.lng);
+    if (tz !== state.tz) {
+      state.tz = tz;
+    }
+  }
+  refreshAll();
+});
+shadowMap.on('heightfield', (stats) => {
+  debug.stats = stats;
+  const parts = [];
+  parts.push(`relief ${stats.tilesLoaded} tuile${stats.tilesLoaded > 1 ? 's' : ''}${stats.tilesMissing ? ` (${stats.tilesMissing} manquante${stats.tilesMissing > 1 ? 's' : ''})` : ''}`);
+  parts.push(`${stats.buildings} bâtiment${stats.buildings > 1 ? 's' : ''}`);
+  parts.push(`${stats.w}×${stats.h}`);
+  setStatus(parts.join(' · '));
+  if (state.point) computeExposure();
+});
+shadowMap.on('computing', () => setStatus('Calcul du relief…'));
+shadowMap.on('progress', (p) => setStatus(`Relief : ${p.loaded}/${p.total} tuiles`));
+shadowMap.on('frame', () => {
+  debug.frames++;
+});
+shadowMap.on('error', (e) => setStatus(`Erreur de calcul : ${e.message || e}`, true));
+let mapErrorShown = 0;
+shadowMap.on('maperror', (err) => {
+  const msg = String((err && err.message) || err);
+  if (/glyph|font/i.test(msg)) return;
+  if (Date.now() - mapErrorShown < 5000) return;
+  mapErrorShown = Date.now();
+  setStatus(`Fond de carte indisponible : ${msg.slice(0, 90)}`, true);
+});
+shadowMap.on('ready', () => refreshAll());
+
+function setStatus(text, isError = false) {
+  ui.status.textContent = text;
+  ui.status.classList.toggle('err', isError);
+}
+
+// ---------- Contrôles temps ----------
+ui.time.addEventListener('input', () => {
+  state.minutes = Number(ui.time.value);
+  refreshSun();
+  scheduleHash();
+});
+ui.date.addEventListener('change', () => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ui.date.value)) {
+    state.date = ui.date.value;
+    refreshAll();
+    if (state.point) computeExposure();
+  }
+});
+ui.now.addEventListener('click', () => {
+  const now = new Date();
+  state.date = formatDateISO(state.tz, now);
+  state.minutes = Math.floor(minutesOfDay(state.tz, now));
+  refreshAll();
+  if (state.point) computeExposure();
+});
+
+let playTimer = null;
+function setPlaying(on) {
+  state.playing = on;
+  ui.play.querySelector('.ic-play').hidden = on;
+  ui.play.querySelector('.ic-pause').hidden = !on;
+  ui.play.setAttribute('aria-label', on ? 'Pause' : 'Lecture');
+  clearInterval(playTimer);
+  if (on) {
+    playTimer = setInterval(() => {
+      state.minutes = (state.minutes + state.speed) % 1440;
+      refreshSun();
+    }, 50);
+  } else {
+    scheduleHash();
+  }
+}
+ui.play.addEventListener('click', () => setPlaying(!state.playing));
+
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target && e.target.tagName) || '';
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    setPlaying(!state.playing);
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    const d = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 60 : 10);
+    state.minutes = ((state.minutes + d) % 1440 + 1440) % 1440;
+    refreshSun();
+    scheduleHash();
+  }
+});
+
+// ---------- Couches ----------
+ui.toggleShadows.checked = state.shadows;
+ui.toggleBuildings.checked = state.buildings3d;
+ui.toggleTerrain.checked = state.terrain;
+ui.opacity.value = String(state.opacity);
+for (const r of document.querySelectorAll('input[name="style"]')) r.checked = r.value === state.style;
+
+ui.toggleShadows.addEventListener('change', () => {
+  state.shadows = ui.toggleShadows.checked;
+  shadowMap.setShadowsVisible(state.shadows);
+  scheduleHash();
+});
+ui.toggleBuildings.addEventListener('change', () => {
+  state.buildings3d = ui.toggleBuildings.checked;
+  shadowMap.setBuildings3d(state.buildings3d);
+  scheduleHash();
+});
+ui.toggleTerrain.addEventListener('change', () => {
+  state.terrain = ui.toggleTerrain.checked;
+  shadowMap.setTerrain3d(state.terrain);
+  scheduleHash();
+});
+ui.opacity.addEventListener('input', () => {
+  state.opacity = Number(ui.opacity.value);
+  shadowMap.setOpacity(state.opacity);
+});
+for (const r of document.querySelectorAll('input[name="style"]')) {
+  r.addEventListener('change', () => {
+    if (!r.checked) return;
+    state.style = r.value;
+    shadowMap.setStyle(state.style);
+    scheduleHash();
+  });
+}
+
+// ---------- Recherche ----------
+let searchAbort = null;
+ui.search.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = ui.searchInput.value.trim();
+  if (!q) return;
+  if (searchAbort) searchAbort.abort();
+  searchAbort = new AbortController();
+  showResults([{ name: 'Recherche…', empty: true }]);
+  try {
+    const res = await searchPlace(q, { signal: searchAbort.signal });
+    showResults(res.length ? res : [{ name: 'Aucun résultat', empty: true }]);
+    if (res.length === 1) goToResult(res[0]);
+  } catch (err) {
+    if (err.name !== 'AbortError') showResults([{ name: 'Recherche indisponible pour le moment', empty: true }]);
+  }
+});
+function showResults(items) {
+  ui.results.innerHTML = '';
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.textContent = it.name;
+    if (it.empty) li.className = 'empty';
+    else {
+      li.tabIndex = 0;
+      li.addEventListener('click', () => goToResult(it));
+      li.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') goToResult(it);
+      });
+    }
+    ui.results.appendChild(li);
+  }
+  ui.results.hidden = items.length === 0;
+}
+function goToResult(r) {
+  ui.results.hidden = true;
+  ui.results.innerHTML = '';
+  if (r.bbox && Math.abs(r.bbox[1] - r.bbox[0]) < 0.5) {
+    map.fitBounds([[r.bbox[2], r.bbox[0]], [r.bbox[3], r.bbox[1]]], { padding: 40, maxZoom: 16.5, duration: 900 });
+  } else {
+    map.flyTo({ center: [r.lng, r.lat], zoom: Math.max(map.getZoom(), 14), duration: 900 });
+  }
+  ui.searchInput.blur();
+}
+document.addEventListener('click', (e) => {
+  if (!ui.search.contains(e.target)) ui.results.hidden = true;
+});
+ui.locate.addEventListener('click', () => {
+  if (!navigator.geolocation) return setStatus('Géolocalisation indisponible', true);
+  setStatus('Recherche de votre position…');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16, duration: 1200 });
+      setStatus('');
+    },
+    () => setStatus('Position refusée ou indisponible', true),
+    { enableHighAccuracy: true, timeout: 10000 },
+  );
+});
+
+// ---------- Panneau / partage ----------
+ui.exposureClear.addEventListener('click', () => setPoint(null));
+ui.panelToggle.addEventListener('click', () => {
+  const collapsed = ui.panel.classList.toggle('collapsed');
+  ui.panelToggle.setAttribute('aria-expanded', String(!collapsed));
+});
+if (isMobile()) {
+  ui.panel.classList.add('collapsed');
+  ui.panelToggle.setAttribute('aria-expanded', 'false');
+}
+ui.share.addEventListener('click', async () => {
+  syncHash();
+  try {
+    await navigator.clipboard.writeText(location.href);
+    ui.shareOk.hidden = false;
+    setTimeout(() => (ui.shareOk.hidden = true), 2000);
+  } catch {
+    prompt('Copiez ce lien :', location.href);
+  }
+});
+
+// ---------- URL ----------
+let hashTimer = null;
+function scheduleHash() {
+  clearTimeout(hashTimer);
+  hashTimer = setTimeout(syncHash, 300);
+}
+function syncHash() {
+  if (state.playing) return;
+  const c = map.getCenter();
+  const h = buildHash({
+    lat: c.lat,
+    lng: c.lng,
+    zoom: map.getZoom(),
+    bearing: map.getBearing(),
+    pitch: map.getPitch(),
+    date: state.date,
+    time: formatMinutes(state.minutes),
+    tz: state.tzAuto ? '' : state.tz,
+    style: state.style,
+    buildings3d: state.buildings3d,
+    terrain: state.terrain,
+    shadows: state.shadows,
+    point: state.point,
+  });
+  if (h !== location.hash) history.replaceState(null, '', h);
+}
+
+// Premier affichage (la carte déclenchera aussi refreshAll à 'ready').
+refreshAll();
+if (state.point) setPoint(state.point);
