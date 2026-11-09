@@ -8,7 +8,13 @@ import { startServer } from './server.mjs';
 
 // Playwright et Chromium sont pré-installés globalement dans l'environnement de test (NODE_PATH).
 const require = createRequire(import.meta.url);
-const { chromium } = require('playwright');
+let chromium;
+try {
+  ({ chromium } = require('playwright'));
+} catch {
+  console.error('Playwright est requis : npm install -D playwright && npx playwright install chromium');
+  process.exit(2);
+}
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'out');
 mkdirSync(OUT, { recursive: true });

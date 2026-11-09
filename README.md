@@ -22,7 +22,8 @@ Les fichiers à publier : `index.html`, `manifest.webmanifest`, `assets/`, `css/
 
 Si `vendor/` ne contient pas `maplibre-gl.js` (dépôt récupéré sans les fichiers minifiés), lancez `npm install && npm run vendor`
 avant de copier. Le workflow « Vendor » le fait aussi automatiquement sur GitHub si les permissions d'écriture des workflows
-sont activées ; et à défaut, la page charge MapLibre et tz-lookup depuis unpkg en repli.
+sont activées ; et à défaut seulement, la page charge MapLibre et tz-lookup depuis unpkg (avec empreinte SRI). Avec
+`vendor/` en place, aucune ressource tierce n'est chargée hors données cartographiques.
 
 ### Option A — un dossier sur le serveur qui sert déjà perso.timelesshouse.org
 
@@ -71,14 +72,16 @@ autre application, il faut soit l'option A, soit un autre sous-domaine.
 ```bash
 npm install          # dépendances de développement uniquement (MapLibre, tz-lookup pour vendor/)
 npm test             # tests unitaires : position du soleil (référence NREL SPA), moteur d'ombres, fuseaux, URL
-npm run serve        # http://localhost:8787 — avec un fond de carte factice et le vrai relief
+npm run serve        # http://localhost:8787 — fond de carte factice (style OpenFreeMap réel, tuiles de test) et vrai relief
 npm run test:e2e     # Chromium + Playwright : rendu réel, captures dans tests/e2e/out/
+                     # (Playwright n'est pas dans package.json : npm install -D playwright && npx playwright install chromium)
 npm run vendor       # re-copie maplibre-gl et tz-lookup depuis node_modules vers vendor/
 ```
 
-En local, `npm run serve` utilise des tuiles factices (grille claire + quelques bâtiments de test à Paris et Chamonix),
-car le serveur de test est hors ligne vis-à-vis des fonds de carte. Ouvrez simplement `index.html` depuis n'importe quel
-serveur statique (`npx serve .`, `python3 -m http.server`) pour la version complète avec OpenFreeMap.
+En local, `npm run serve` injecte une configuration de test dans la page : tuiles factices (grille claire + quelques
+bâtiments de test à Paris et Chamonix) mais vrai relief, sans dépendre des serveurs de fonds de carte. Pour la version
+complète avec OpenFreeMap, servez simplement le dossier avec n'importe quel serveur statique (`npx serve .`,
+`python3 -m http.server`).
 
 ## Comment ça marche
 

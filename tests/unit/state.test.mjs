@@ -36,4 +36,6 @@ test('hash invalide ou vide', () => {
   assert.equal(p.zoom, 12);
   assert.equal(p.date, undefined);
   assert.equal(p.time, undefined);
+  assert.equal(parseHash('#48.8/2.3/12?p=120,2.3').point, undefined, 'latitude du point hors bornes ignorée');
+  assert.equal(parseHash('#48.8/2.3/12?p=48.8,200').point, undefined, 'longitude du point hors bornes ignorée');
 });

@@ -120,12 +120,19 @@ function demTile(z, x, y) {
   }
 }
 
-export function startServer(port = 0) {
+export function startServer(port = 0, { injectConfig = false } = {}) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const base = `http://localhost:${server.address().port}`;
     res.setHeader('Access-Control-Allow-Origin', '*');
     let m;
+    if (injectConfig && (url.pathname === '/' || url.pathname === '/index.html')) {
+      // Mode « npm run serve » : la page pointe vers le style factice et le relais de relief local.
+      const cfg = { demUrl: `${base}/dem/{z}/{x}/{y}.png`, planStyle: `${base}/mock/ofm/bright.json`, satelliteStyle: `${base}/mock/style.json`, openFreeMap: `${base}/mock/ofm` };
+      const html = readFileSync(join(ROOT, 'index.html'), 'utf8').replace('<script src="vendor/maplibre-gl.js', `<script>window.OMBRES_CONFIG = ${JSON.stringify(cfg)};</script>\n  <script src="vendor/maplibre-gl.js`);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(html);
+    }
     if (url.pathname === '/mock/style.json') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(mockStyle(base)));
@@ -203,6 +210,6 @@ export function startServer(port = 0) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { port } = await startServer(Number(process.env.PORT) || 8787);
-  console.log(`Ombres : http://localhost:${port}/  (style factice : http://localhost:${port}/mock/style.json)`);
+  const { port } = await startServer(Number(process.env.PORT) || 8787, { injectConfig: true });
+  console.log(`Ombres : http://localhost:${port}/  (fond de carte factice, vrai relief via le relais local)`);
 }

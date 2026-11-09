@@ -23,7 +23,7 @@ export function parseHash(hash) {
   if (q.get('m') === 'exposure') out.mode = 'exposure';
   if (q.get('p')) {
     const p = q.get('p').split(',').map(parseFloat);
-    if (p.length === 2 && p.every(Number.isFinite)) out.point = { lat: p[0], lng: p[1] };
+    if (p.length === 2 && p.every(Number.isFinite) && Math.abs(p[0]) <= 85 && Math.abs(p[1]) <= 180) out.point = { lat: p[0], lng: p[1] };
   }
   return out;
 }

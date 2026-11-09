@@ -29,11 +29,13 @@ const DEFAULT_VIEW = { lat: 48.8566, lng: 2.3522, zoom: 15.3 };
 let tzlookup = null;
 let tzReady = Promise.resolve();
 try {
-  tzlookup = (await import('../vendor/tz-lookup.js')).default;
+  tzlookup = (await import('../vendor/tz-lookup.js?v=11.8.0')).default;
 } catch {
   tzReady = new Promise((resolve) => {
     const sc = document.createElement('script');
     sc.src = 'https://unpkg.com/@photostructure/tz-lookup@11.8.0/tz.js';
+    sc.integrity = 'sha384-FRR+ESsmuFIumQk9dxScp1ZHQkRHgIOofu77TV9B0bMdBhljigxyEAtPumYSjaBL';
+    sc.crossOrigin = 'anonymous';
     sc.onload = () => {
       if (typeof window.tzlookup === 'function') tzlookup = window.tzlookup;
       resolve();
