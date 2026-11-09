@@ -20,6 +20,7 @@ export function parseHash(hash) {
   if (q.has('b3d')) out.buildings3d = q.get('b3d') === '1';
   if (q.has('ter')) out.terrain = q.get('ter') === '1';
   if (q.has('sh')) out.shadows = q.get('sh') === '1';
+  if (q.get('m') === 'exposure') out.mode = 'exposure';
   if (q.get('p')) {
     const p = q.get('p').split(',').map(parseFloat);
     if (p.length === 2 && p.every(Number.isFinite)) out.point = { lat: p[0], lng: p[1] };
@@ -39,6 +40,7 @@ export function buildHash(st) {
   if (st.buildings3d === false) q.set('b3d', '0');
   if (st.terrain) q.set('ter', '1');
   if (st.shadows === false) q.set('sh', '0');
+  if (st.mode === 'exposure') q.set('m', 'exposure');
   if (st.point) q.set('p', `${r(st.point.lat, 5)},${r(st.point.lng, 5)}`);
   const qs = q.toString().replace(/%3A/g, ':').replace(/%2C/g, ',').replace(/%2F/g, '/');
   return `#${path}${qs ? '?' + qs : ''}`;

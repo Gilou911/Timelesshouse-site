@@ -69,6 +69,15 @@
 
     <section class="card">
       <h2>Couches</h2>
+      <div class="seg" role="radiogroup" aria-label="Mode d'affichage">
+        <label><input type="radio" name="mode" value="shadows" checked><span>Ombres à l'heure</span></label>
+        <label><input type="radio" name="mode" value="exposure"><span>Heures de soleil</span></label>
+      </div>
+      <div id="legend" class="legend" hidden>
+        <div class="legend-bar"></div>
+        <div class="legend-labels"><span>0 h</span><span id="legend-mid">—</span><span id="legend-max">—</span></div>
+        <p class="hint">Heures de soleil direct reçues ce jour-là, en chaque point.</p>
+      </div>
       <label class="switch"><input type="checkbox" id="toggle-shadows" checked> <span>Ombres</span></label>
       <label class="switch"><input type="checkbox" id="toggle-buildings" checked> <span>Bâtiments 3D</span></label>
       <label class="switch"><input type="checkbox" id="toggle-terrain"> <span>Relief 3D</span></label>

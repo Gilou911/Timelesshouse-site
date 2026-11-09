@@ -22,6 +22,20 @@ export function lngLatToMercator(lng, lat) {
   ];
 }
 
+/**
+ * Facteur d'échelle par ligne de grille : mètres par cellule sur la ligne y, rapportés à ceux de la latitude de référence.
+ * (En Mercator, une cellule couvre d'autant moins de mètres que la latitude est élevée.)
+ */
+export function rowScaleFactors(grid, latRef) {
+  const out = new Float32Array(grid.h);
+  const cosRef = Math.cos(latRef * RAD);
+  for (let y = 0; y < grid.h; y++) {
+    const lat = mercatorToLngLat(0, grid.originY + (y + 0.5) * grid.cellUnits)[1];
+    out[y] = Math.cos(lat * RAD) / cosRef;
+  }
+  return out;
+}
+
 export function mercatorToLngLat(x, y) {
   const lng = x * 360 - 180;
   const lat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) / RAD);
@@ -214,7 +228,7 @@ export function rasterizeBuildings(H, T, grid, buildings) {
  * @param {number} cellMeters taille d'une cellule en mètres
  * @param {Float32Array} depth sortie (w*h)
  */
-export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth) {
+export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowScale = null) {
   if (altitude <= 0) {
     depth.fill(NIGHT);
     return depth;
@@ -228,6 +242,8 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth) {
   const sx = dx / m;
   const sy = dy / m;
   const stepMeters = Math.hypot(sx, sy) * cellMeters;
+  // Perte de hauteur de la ligne d'ombre par pas ; `rowScale` (facultatif, par ligne) corrige la variation
+  // d'échelle de la projection Mercator avec la latitude sur les vues très étendues.
   const drop = Math.tan(altitude * RAD) * stepMeters;
 
   const line = (x0, y0) => {
@@ -246,7 +262,7 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth) {
       } else {
         top = z;
       }
-      top -= drop;
+      top -= rowScale ? drop * rowScale[iy] : drop;
       px += sx;
       py += sy;
     }
@@ -305,11 +321,12 @@ export function depthToRGBA(depth, w, h, out, style) {
  * samples = [{ azimuth, altitude }, …] ; retourne Uint8Array (1 = éclairé, 0 = à l'ombre / nuit).
  * @param {number} eyeHeight hauteur (m) au-dessus de la surface locale (ex. 1,5 m pour une personne)
  */
-export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 0) {
+export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 0, rowScale = null) {
   const out = new Uint8Array(samples.length);
   const ix0 = Math.min(w - 1, Math.max(0, Math.floor(gx)));
   const iy0 = Math.min(h - 1, Math.max(0, Math.floor(gy)));
   const z0 = H[iy0 * w + ix0] + eyeHeight;
+  if (rowScale) cellMeters *= rowScale[iy0];
   let maxH = -Infinity;
   for (let i = 0; i < H.length; i++) if (H[i] > maxH) maxH = H[i];
   for (let s = 0; s < samples.length; s++) {
@@ -347,4 +364,72 @@ export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 
     out[s] = lit;
   }
   return out;
+}
+
+/**
+ * Cumule, cellule par cellule, les minutes de soleil direct sur une liste d'instants (un balayage par instant).
+ * samples = [{ azimuth, altitude }], chaque échantillon vaut `stepMinutes`.
+ * `onProgress(k, n)` est appelé après chaque balayage (facultatif).
+ */
+export function accumulateExposure(H, w, h, samples, stepMinutes, cellMeters, rowScale, depth, acc, onProgress) {
+  acc.fill(0);
+  const n = w * h;
+  for (let k = 0; k < samples.length; k++) {
+    const s = samples[k];
+    if (s.altitude > 0) {
+      sweepShadows(H, w, h, s.azimuth, s.altitude, cellMeters, depth, rowScale);
+      for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += stepMinutes;
+    }
+    if (onProgress) onProgress(k + 1, samples.length);
+  }
+  return acc;
+}
+
+/** Rampe de couleurs (minutes de soleil → RGBA) : nuit bleue → pourpre → orange → jaune pâle. */
+export const EXPOSURE_RAMP = [
+  [0, 28, 36, 86],
+  [0.25, 96, 58, 138],
+  [0.5, 204, 92, 74],
+  [0.75, 245, 166, 35],
+  [1, 255, 238, 130],
+];
+
+export function exposureColor(t) {
+  const r = EXPOSURE_RAMP;
+  if (t <= 0) return [r[0][1], r[0][2], r[0][3]];
+  if (t >= 1) return [r[r.length - 1][1], r[r.length - 1][2], r[r.length - 1][3]];
+  for (let i = 1; i < r.length; i++) {
+    if (t <= r[i][0]) {
+      const a = r[i - 1];
+      const b = r[i];
+      const f = (t - a[0]) / (b[0] - a[0]);
+      return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+    }
+  }
+  return [r[r.length - 1][1], r[r.length - 1][2], r[r.length - 1][3]];
+}
+
+/** Convertit le cumul (minutes) en image RGBA ; maxMinutes = durée du jour (ou valeur max). */
+export function exposureToRGBA(acc, w, h, out, maxMinutes, alpha) {
+  const n = w * h;
+  const rgba = out || new Uint8ClampedArray(n * 4);
+  const lut = new Uint8ClampedArray(257 * 3);
+  for (let i = 0; i <= 256; i++) {
+    const c = exposureColor(i / 256);
+    lut[i * 3] = c[0];
+    lut[i * 3 + 1] = c[1];
+    lut[i * 3 + 2] = c[2];
+  }
+  const scale = maxMinutes > 0 ? 256 / maxMinutes : 0;
+  for (let i = 0; i < n; i++) {
+    let k = Math.round(acc[i] * scale);
+    if (k > 256) k = 256;
+    if (k < 0) k = 0;
+    const j = i << 2;
+    rgba[j] = lut[k * 3];
+    rgba[j + 1] = lut[k * 3 + 1];
+    rgba[j + 2] = lut[k * 3 + 2];
+    rgba[j + 3] = alpha;
+  }
+  return rgba;
 }

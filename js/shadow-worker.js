@@ -1,17 +1,21 @@
 // Web Worker : télécharge le relief (tuiles Terrarium), construit le champ de hauteurs
 // (relief + bâtiments) et calcule les ombres à la demande.
 import {
-  DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, sweepShadows, depthToRGBA, pointExposure,
+  DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, sweepShadows, depthToRGBA, pointExposure, rowScaleFactors,
+  accumulateExposure, exposureToRGBA,
 } from './shadow-engine.js';
 
 const TILE_SIZE = 256;
-const MAX_CACHE = 600;
+const MAX_CACHE = 240; // ~60 Mo de hauteurs décodées au maximum
 const CONCURRENCY = 8;
 
 let demTemplate = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const tileCache = new Map(); // "z/x/y" → Promise<Float32Array|null>
 let current = null; // champ de hauteurs courant
 let lastSun = null; // { azimuth, altitude }
+let mode = 'shadows'; // 'shadows' | 'exposure'
+let lastExposure = null; // { samples, stepMinutes, maxMinutes }
+let exposureToken = 0;
 let style = { shadow: [18, 26, 48, 115], night: [12, 16, 40, 150], soft: false };
 let hfToken = 0;
 
@@ -74,7 +78,7 @@ async function runPool(tasks, limit) {
 
 async function buildHeightfield(msg) {
   const token = ++hfToken;
-  const { id, grid, demZoom, buildings, cellMeters, useTerrain, useBuildings } = msg;
+  const { id, grid, demZoom, buildings, cellMeters, latCenter, useTerrain, useBuildings } = msg;
   const { w, h } = grid;
   const T = new Float32Array(w * h);
   let tilesLoaded = 0;
@@ -122,13 +126,55 @@ async function buildHeightfield(msg) {
     if (v < minH) minH = v;
     if (v > maxH) maxH = v;
   }
-  current = { id, grid, H, T, depth: new Float32Array(w * h), cellMeters };
+  const rowScale = Number.isFinite(latCenter) ? rowScaleFactors(grid, latCenter) : null;
+  current = { id, grid, H, T, depth: new Float32Array(w * h), cellMeters, rowScale };
   postMessage({
     type: 'heightfield-ready',
     id,
     stats: { tilesLoaded, tilesMissing, buildings: touched, minH, maxH, w, h },
   });
-  if (lastSun) render({ id, ...lastSun });
+  if (mode === 'exposure' && lastExposure) exposureMap({ ...lastExposure });
+  else if (lastSun) render({ id, ...lastSun });
+}
+
+/** Carte des heures de soleil : un balayage par échantillon, avec cession du fil entre deux pour rester réactif. */
+async function exposureMap(msg) {
+  lastExposure = { samples: msg.samples, stepMinutes: msg.stepMinutes, maxMinutes: msg.maxMinutes };
+  if (!current) {
+    postMessage({ type: 'frame-skipped', requestId: msg.requestId });
+    return;
+  }
+  const token = ++exposureToken;
+  const { grid, H, depth, cellMeters, rowScale } = current;
+  const { w, h } = grid;
+  const acc = new Float32Array(w * h);
+  const t0 = performance.now();
+  const n = w * h;
+  let k = 0;
+  for (const s of msg.samples) {
+    if (token !== exposureToken || current.grid !== grid) {
+      postMessage({ type: 'frame-skipped', requestId: msg.requestId });
+      return;
+    }
+    if (s.altitude > 0) {
+      sweepShadows(H, w, h, s.azimuth, s.altitude, cellMeters, depth, rowScale);
+      for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += msg.stepMinutes;
+    }
+    k++;
+    if (k % 6 === 0) {
+      postMessage({ type: 'progress', id: current.id, loaded: k, total: msg.samples.length, kind: 'exposure' });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+  if (token !== exposureToken || current.grid !== grid) return;
+  let maxAcc = 0;
+  for (let i = 0; i < n; i++) if (acc[i] > maxAcc) maxAcc = acc[i];
+  const maxMinutes = msg.maxMinutes > 0 ? msg.maxMinutes : maxAcc;
+  const rgba = exposureToRGBA(acc, w, h, null, maxMinutes, style.exposureAlpha || 165);
+  postMessage(
+    { type: 'frame', id: current.id, requestId: msg.requestId, w, h, buffer: rgba.buffer, ms: performance.now() - t0, kind: 'exposure', maxMinutes, maxAcc },
+    [rgba.buffer],
+  );
 }
 
 function render(msg) {
@@ -138,10 +184,10 @@ function render(msg) {
     postMessage({ type: 'frame-skipped', requestId: msg.requestId });
     return;
   }
-  const { grid, H, depth, cellMeters } = current;
+  const { grid, H, depth, cellMeters, rowScale } = current;
   const { w, h } = grid;
   const t0 = performance.now();
-  sweepShadows(H, w, h, msg.azimuth, msg.altitude, cellMeters, depth);
+  sweepShadows(H, w, h, msg.azimuth, msg.altitude, cellMeters, depth, rowScale);
   const rgba = depthToRGBA(depth, w, h, null, style);
   postMessage(
     { type: 'frame', id: current.id, requestId: msg.requestId, w, h, buffer: rgba.buffer, ms: performance.now() - t0 },
@@ -154,14 +200,14 @@ function exposure(msg) {
     postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null });
     return;
   }
-  const { grid, H, cellMeters } = current;
+  const { grid, H, cellMeters, rowScale } = current;
   const gx = (msg.x - grid.originX) / grid.cellUnits;
   const gy = (msg.y - grid.originY) / grid.cellUnits;
   if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) {
     postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null });
     return;
   }
-  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, msg.eyeHeight || 0);
+  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, msg.eyeHeight || 0, rowScale);
   const ix = Math.floor(gx);
   const iy = Math.floor(gy);
   postMessage({
@@ -179,13 +225,25 @@ self.onmessage = (ev) => {
     case 'config':
       if (msg.demTemplate) demTemplate = msg.demTemplate;
       if (msg.style) style = { ...style, ...msg.style };
-      if (msg.style && current && lastSun) render({ ...lastSun });
+      if (msg.mode) mode = msg.mode;
+      if (msg.style && current) {
+        if (mode === 'exposure' && lastExposure) exposureMap({ ...lastExposure });
+        else if (lastSun) render({ ...lastSun });
+      }
+      break;
+    case 'exposure-map':
+      exposureMap(msg).catch((err) => postMessage({ type: 'error', message: String(err) }));
       break;
     case 'heightfield':
       buildHeightfield(msg).catch((err) => postMessage({ type: 'error', id: msg.id, message: String(err) }));
       break;
     case 'render':
-      render(msg);
+      if (mode === 'exposure') {
+        lastSun = { azimuth: msg.azimuth, altitude: msg.altitude };
+        postMessage({ type: 'frame-skipped', requestId: msg.requestId });
+      } else {
+        render(msg);
+      }
       break;
     case 'exposure':
       exposure(msg);

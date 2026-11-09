@@ -17,6 +17,7 @@ const ui = {
   exposureHint: $('exposure-hint'), exposure: $('exposure'), exposureHours: $('exposure-hours'), exposureList: $('exposure-list'),
   exposureBar: $('exposure-bar'), exposureMeta: $('exposure-meta'), exposureClear: $('exposure-clear'),
   toggleShadows: $('toggle-shadows'), toggleBuildings: $('toggle-buildings'), toggleTerrain: $('toggle-terrain'),
+  legend: $('legend'), legendMid: $('legend-mid'), legendMax: $('legend-max'),
   opacity: $('opacity'), share: $('share'), shareOk: $('share-ok'),
   play: $('play'), date: $('date'), timeLabel: $('time-label'), tzLabel: $('tz-label'), now: $('now'), time: $('time'), status: $('status'),
 };
@@ -48,6 +49,7 @@ const state = {
   shadows: hash.shadows ?? true,
   opacity: 0.45,
   point: hash.point || null,
+  mode: hash.mode === 'exposure' ? 'exposure' : 'shadows',
   playing: false,
   speed: 2,
 };
@@ -94,6 +96,7 @@ const shadowMap = new ShadowMap('map', {
   terrain: state.terrain,
   shadows: state.shadows,
   opacity: state.opacity,
+  mode: state.mode,
   cellBudget: isMobile() ? 600000 : 1200000,
 });
 const map = shadowMap.map;
@@ -160,6 +163,33 @@ function refreshDay() {
     const p = sunPosition(wallToUTC(state.tz, y, mo, d, h, 0), c.lat, c.lng);
     hourPositions.push({ label: `${h}h`, azimuth: p.azimuth, altitude: p.altitude });
   }
+  if (state.mode === 'exposure') requestExposureMap();
+}
+
+/** Carte des heures de soleil : échantillons du jour (toutes les 20 min) au centre de la carte. */
+function requestExposureMap() {
+  const center = map.getCenter();
+  const { y, mo, d } = dateParts();
+  const step = 20;
+  const samples = [];
+  for (let m = 0; m < 1440; m += step) {
+    const p = sunPosition(wallToUTC(state.tz, y, mo, d, Math.floor(m / 60), m % 60), center.lat, center.lng);
+    samples.push({ azimuth: p.azimuth, altitude: p.altitude });
+  }
+  const maxMinutes = day ? day.dayLengthMinutes : 0;
+  shadowMap.requestExposureMap(samples, step, maxMinutes);
+  ui.legendMax.textContent = formatDuration(maxMinutes);
+  ui.legendMid.textContent = formatDuration(maxMinutes / 2);
+  setStatus('Calcul des heures de soleil…');
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  for (const r of document.querySelectorAll('input[name="mode"]')) r.checked = r.value === mode;
+  ui.legend.hidden = mode !== 'exposure';
+  shadowMap.setMode(mode);
+  if (mode === 'exposure') requestExposureMap();
+  scheduleHash();
 }
 
 function refreshSun() {
@@ -297,9 +327,13 @@ shadowMap.on('heightfield', (stats) => {
   if (state.point) computeExposure();
 });
 shadowMap.on('computing', () => setStatus('Calcul du relief…'));
-shadowMap.on('progress', (p) => setStatus(`Relief : ${p.loaded}/${p.total} tuiles`));
-shadowMap.on('frame', () => {
+shadowMap.on('progress', (p) => setStatus(p.kind === 'exposure' ? `Heures de soleil : ${Math.round((100 * p.loaded) / p.total)} %` : `Relief : ${p.loaded}/${p.total} tuiles`));
+shadowMap.on('frame', (f) => {
   debug.frames++;
+  if (f.kind === 'exposure') setStatus(`Heures de soleil calculées en ${(f.ms / 1000).toFixed(1).replace('.', ',')} s · max ${formatDuration(f.maxAcc)}`);
+});
+shadowMap.on('heightfield', () => {
+  if (state.mode === 'exposure') requestExposureMap();
 });
 shadowMap.on('error', (e) => setStatus(`Erreur de calcul : ${e.message || e}`, true));
 let mapErrorShown = 0;
@@ -397,6 +431,13 @@ ui.opacity.addEventListener('input', () => {
   state.opacity = Number(ui.opacity.value);
   shadowMap.setOpacity(state.opacity);
 });
+for (const r of document.querySelectorAll('input[name="mode"]')) {
+  r.checked = r.value === state.mode;
+  r.addEventListener('change', () => {
+    if (r.checked) setMode(r.value);
+  });
+}
+ui.legend.hidden = state.mode !== 'exposure';
 for (const r of document.querySelectorAll('input[name="style"]')) {
   r.addEventListener('change', () => {
     if (!r.checked) return;
@@ -510,6 +551,7 @@ function syncHash() {
     terrain: state.terrain,
     shadows: state.shadows,
     point: state.point,
+    mode: state.mode,
   });
   if (h !== location.hash) history.replaceState(null, '', h);
 }

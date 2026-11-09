@@ -110,6 +110,10 @@ body {
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg span { display: block; text-align: center; padding: 7px 0; font-size: 13px; cursor: pointer; color: var(--muted); }
 .seg input:checked + span { background: rgba(255, 210, 63, 0.18); color: var(--text); font-weight: 600; }
+.legend { margin: 6px 0 10px; }
+.legend-bar { height: 10px; border-radius: 5px; background: linear-gradient(90deg, #1c2456 0%, #603a8a 25%, #cc5c4a 50%, #f5a623 75%, #ffee82 100%); }
+.legend-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.legend .hint { margin-top: 6px; font-size: 12px; }
 .range-label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .range-label input { width: 100%; accent-color: var(--accent); }
 .btn {
@@ -164,6 +168,10 @@ body {
   box-shadow: 0 0 0 3px rgba(26, 35, 64, 0.6);
 }
 
+@supports (height: 100dvh) {
+  .panel { max-height: calc(100dvh - var(--topbar-h) - var(--timebar-h) - 16px); }
+}
+
 /* ---------- Mobile ---------- */
 @media (max-width: 760px) {
   :root { --timebar-h: 124px; }
@@ -172,7 +180,7 @@ body {
   .panel-toggle { display: inline-flex; }
   .panel {
     top: auto; left: 0; right: 0; width: auto; bottom: var(--timebar-h);
-    max-height: 55vh; padding: 0 10px; border-radius: 0;
+    max-height: min(55vh, 55dvh); padding: 0 10px; border-radius: 0;
     transition: transform 0.25s ease, opacity 0.25s ease;
   }
   .panel.collapsed { transform: translateY(20px); opacity: 0; pointer-events: none; }

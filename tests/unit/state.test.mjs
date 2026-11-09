@@ -23,6 +23,9 @@ test('aller-retour de l\'état dans le hash', () => {
   assert.equal(p2.buildings3d, false);
   assert.equal(p2.terrain, true);
   assert.equal(p2.shadows, false);
+  const p3 = parseHash(buildHash({ ...st, mode: 'exposure' }));
+  assert.equal(p3.mode, 'exposure');
+  assert.equal(parseHash(buildHash(st)).mode, undefined);
   assert.deepEqual(p.point, { lat: 48.85, lng: 2.35 });
 });
 

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sweepShadows, rasterizeBuildings, decodeTerrarium, DemMosaic, fillTerrain, depthToRGBA, pointExposure,
-  lngLatToMercator, mercatorToLngLat, metersPerUnit, NIGHT,
+  lngLatToMercator, mercatorToLngLat, metersPerUnit, rowScaleFactors, accumulateExposure, exposureToRGBA, exposureColor, NIGHT,
 } from '../../js/shadow-engine.js';
 
 function grid(w, h) {
@@ -163,4 +163,53 @@ test('performance : balayage 1024x1024 en moins de 400 ms', () => {
   sweepShadows(H, w, h, 215, 25, 2, depth);
   const dt = performance.now() - t0;
   assert.ok(dt < 400, `balayage en ${dt.toFixed(0)} ms`);
+});
+
+test('rowScale : une cellule « plus petite » en mètres allonge l\'ombre en cellules', () => {
+  const { w, h, H, depth } = grid(41, 61);
+  H[10 * w + 20] = 10; // tour au nord (lignes 0-30 : échelle 1)
+  H[50 * w + 20] = 10; // tour au sud (lignes 31-60 : échelle 0,5 → chaque cellule vaut 0,5 m)
+  const rowScale = new Float32Array(h).fill(1);
+  for (let y = 31; y < h; y++) rowScale[y] = 0.5;
+  sweepShadows(H, w, h, 90, 45, 1, depth, rowScale); // soleil à l'est : ombre vers l'ouest
+  const len = (row) => {
+    let n = 0;
+    for (let x = 0; x < 20; x++) if (depth[row * w + x] > 0) n++;
+    return n;
+  };
+  assert.ok(Math.abs(len(10) - 10) <= 1, `ombre nord ${len(10)} cellules`);
+  assert.ok(Math.abs(len(50) - 20) <= 1, `ombre sud ${len(50)} cellules`);
+});
+
+test('rowScaleFactors : 1 à la latitude de référence, plus petit vers le pôle, plus grand vers l\'équateur', () => {
+  const [, yN] = lngLatToMercator(0, 60);
+  const [, yS] = lngLatToMercator(0, 45);
+  const gridSpec = { w: 1, h: 3, originY: yN, cellUnits: (yS - yN) / 3 };
+  const latMid = mercatorToLngLat(0, yN + 1.5 * gridSpec.cellUnits)[1];
+  const f = rowScaleFactors(gridSpec, latMid);
+  assert.ok(Math.abs(f[1] - 1) < 1e-6, `ligne centrale ${f[1]}`);
+  assert.ok(f[0] < 1 && f[2] > 1, `${f[0]} ${f[2]}`);
+});
+
+test('accumulateExposure : le nord d\'un mur reçoit moins de soleil que le sud', () => {
+  const w = 30;
+  const h = 30;
+  const H = new Float32Array(w * h);
+  for (let x = 0; x < w; x++) H[15 * w + x] = 20;
+  const samples = [];
+  for (let az = 90; az <= 270; az += 10) samples.push({ azimuth: az, altitude: 30 }); // course grossière (hémisphère nord)
+  samples.push({ azimuth: 0, altitude: -5 }); // nuit : ignoré
+  const depth = new Float32Array(w * h);
+  const acc = new Float32Array(w * h);
+  let calls = 0;
+  accumulateExposure(H, w, h, samples, 10, 1, null, depth, acc, () => calls++);
+  assert.equal(calls, samples.length);
+  const north = acc[5 * w + 15];
+  const south = acc[25 * w + 15];
+  assert.ok(south > north, `sud ${south} > nord ${north}`);
+  assert.equal(south, 190, 'côté sud : toutes les positions de jour comptent (19 × 10 min)');
+  const rgba = exposureToRGBA(acc, w, h, null, 190, 200);
+  assert.equal(rgba[(25 * w + 15) * 4 + 3], 200);
+  const cSouth = exposureColor(1);
+  assert.deepEqual([rgba[(25 * w + 15) * 4], rgba[(25 * w + 15) * 4 + 1], rgba[(25 * w + 15) * 4 + 2]], cSouth);
 });

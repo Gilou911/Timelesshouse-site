@@ -58,6 +58,7 @@ export class ShadowMap {
       terrain: false,
       shadows: true,
       opacity: 0.45,
+      mode: 'shadows',
       quality: 1,
       cellBudget: 1200000,
       ...options,
@@ -136,7 +137,26 @@ export class ShadowMap {
 
   _style() {
     const a = Math.round(255 * this.options.opacity);
-    return { shadow: [18, 26, 48, a], night: [10, 14, 36, Math.min(255, a + 60)], soft: false };
+    return { shadow: [18, 26, 48, a], night: [10, 14, 36, Math.min(255, a + 60)], soft: false, exposureAlpha: Math.min(230, a + 80) };
+  }
+
+  /** Mode d'affichage : 'shadows' (ombres à l'instant choisi) ou 'exposure' (heures de soleil du jour). */
+  setMode(mode) {
+    if (mode !== 'shadows' && mode !== 'exposure') return;
+    this.options.mode = mode;
+    this.worker.postMessage({ type: 'config', mode });
+    if (mode === 'shadows') this._requestRender();
+  }
+
+  /** Demande la carte des heures de soleil pour les échantillons donnés (azimut/élévation) du jour. */
+  requestExposureMap(samples, stepMinutes, maxMinutes) {
+    this.lastExposureRequest = { samples, stepMinutes, maxMinutes };
+    this.frameInFlight = true;
+    clearTimeout(this._renderGuard);
+    this._renderGuard = setTimeout(() => {
+      this.frameInFlight = false;
+    }, 30000);
+    this.worker.postMessage({ type: 'exposure-map', requestId: ++this.requestId, samples, stepMinutes, maxMinutes });
   }
 
   /** Re-crée nos sources/couches après chaque chargement de style. */
@@ -269,6 +289,9 @@ export class ShadowMap {
         },
       });
       if (style.glyphs) {
+        // Même police que les étiquettes du style (les polices disponibles dépendent du serveur de glyphes).
+        const symbolWithFont = layers.find((l) => l.type === 'symbol' && l.layout && Array.isArray(l.layout['text-font']) && l.layout['text-font'].every((f) => typeof f === 'string'));
+        const font = symbolWithFont ? symbolWithFont.layout['text-font'] : ['Noto Sans Regular'];
         map.addLayer({
           id: 'ombres-sunpath-labels',
           type: 'symbol',
@@ -277,7 +300,7 @@ export class ShadowMap {
           layout: {
             'text-field': ['get', 'label'],
             'text-size': 11,
-            'text-font': ['Noto Sans Regular'],
+            'text-font': font,
             'text-allow-overlap': true,
             'text-ignore-placement': true,
           },
@@ -392,6 +415,7 @@ export class ShadowMap {
         demZoom,
         buildings,
         cellMeters,
+        latCenter: center.lat,
         useTerrain: this.options.terrainShadows !== false,
         useBuildings: this.options.buildingShadows !== false,
       },
@@ -515,7 +539,7 @@ export class ShadowMap {
       this.map.triggerRepaint();
       this.map.once('render', () => src.pause());
     }
-    this.emit('frame', { ms: msg.ms, w, h });
+    this.emit('frame', { ms: msg.ms, w, h, kind: msg.kind || 'shadows', maxMinutes: msg.maxMinutes, maxAcc: msg.maxAcc });
     if (this.sunDirty) {
       this.sunDirty = false;
       this._requestRender();
@@ -523,6 +547,7 @@ export class ShadowMap {
   }
 
   _requestRender() {
+    if (this.options.mode === 'exposure') return;
     if (this.frameInFlight) {
       this.sunDirty = true;
       return;

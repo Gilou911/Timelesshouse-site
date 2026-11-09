@@ -185,6 +185,55 @@ await scenario('Mobile : panneau replié, barre de temps visible, recherche par 
   await context.close();
 });
 
+await scenario('Changement de fond de carte : couches ré-installées, ombres conservées', async () => {
+  const { page, context } = await openPage({ viewport: { width: 1100, height: 750 }, hash: '#48.8566/2.3522/15.5?d=2026-11-09&t=15:30' });
+  await waitForFrame(page, 1);
+  const frames0 = await page.evaluate(() => window.__ombres.frames);
+  await page.click('label:has(input[name="style"][value="satellite"])');
+  await page.waitForFunction((n) => window.__ombres.frames > n && window.__ombres.shadowMap.currentGridId !== null, frames0, { timeout: 30000 });
+  await page.waitForTimeout(500);
+  const layers = await page.evaluate(() => {
+    const m = window.__ombres.shadowMap.map;
+    return ['ombres-overlay', 'ombres-buildings-3d', 'ombres-sunpath-ray', 'ombres-hillshade'].map((id) => !!m.getLayer(id));
+  });
+  assert.deepEqual(layers, [true, true, true, true], `couches après setStyle : ${layers}`);
+  const cov = await overlayCoverage(page);
+  assert.ok(cov.ratio > 0.03, `ombres après changement de style : ${JSON.stringify(cov)}`);
+  const stats = await page.evaluate(() => window.__ombres.stats);
+  assert.ok(stats.buildings > 100, `bâtiments après changement de style : ${stats.buildings}`);
+  assert.ok(/style=satellite/.test(page.url()), page.url());
+  await context.close();
+});
+
+await scenario('Heures de soleil : carte cumulée du jour, légende, URL', async () => {
+  const { page, context } = await openPage({ viewport: { width: 1100, height: 750 }, hash: '#48.8566/2.3522/15.5?d=2026-11-09&t=15:30' });
+  await waitForFrame(page, 1);
+  await page.click('label:has(input[name="mode"][value="exposure"])');
+  await page.waitForFunction(() => /Heures de soleil calculées/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  await page.waitForTimeout(300);
+  const legendVisible = await page.isVisible('#legend');
+  assert.ok(legendVisible, 'légende visible');
+  const maxLabel = await page.textContent('#legend-max');
+  assert.ok(/9 h \d\d/.test(maxLabel), `légende max = durée du jour : ${maxLabel}`);
+  // L'image doit contenir plusieurs couleurs distinctes (zones plus ou moins ensoleillées).
+  const colors = await page.evaluate(() => {
+    const sm = window.__ombres.shadowMap;
+    const d = sm.ctx.getImageData(0, 0, sm.canvas.width, sm.canvas.height).data;
+    const set = new Set();
+    for (let i = 0; i < d.length; i += 4 * 97) set.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
+    return set.size;
+  });
+  assert.ok(colors > 8, `nuances de couleurs : ${colors}`);
+  assert.ok(/m=exposure/.test(page.url()), page.url());
+  await page.screenshot({ path: join(OUT, 'paris-exposure.png') });
+  // Retour au mode ombres : une nouvelle image est rendue.
+  const before = await page.evaluate(() => window.__ombres.frames);
+  await page.click('label:has(input[name="mode"][value="shadows"])');
+  await page.waitForFunction((n) => window.__ombres.frames > n, before, { timeout: 20000 });
+  assert.ok(!(await page.isVisible('#legend')), 'légende masquée');
+  await context.close();
+});
+
 await scenario('Lecture (animation) et clavier', async () => {
   const { page, context } = await openPage({ viewport: { width: 1000, height: 700 }, hash: '#48.8566/2.3522/15?d=2026-03-20&t=10:00' });
   await waitForFrame(page, 1);
