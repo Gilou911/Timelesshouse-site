@@ -4,7 +4,6 @@ import { sunPosition, dayInfo, lightPhase, shadowLength } from './sun.js';
 import {
   browserTimeZone, isValidTimeZone, wallToUTC, minutesOfDay, tzLabel, formatMinutes, formatTime, formatDateISO, formatDuration,
 } from './tz.js';
-import tzlookup from '../vendor/tz-lookup.js';
 import { parseHash, buildHash } from './state.js';
 import { searchPlace } from './geocode.js';
 
@@ -25,9 +24,29 @@ const ui = {
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
 const DEFAULT_VIEW = { lat: 48.8566, lng: 2.3522, zoom: 15.3 };
 
+// tz-lookup (lat/lng → fuseau IANA) : version embarquée dans vendor/, sinon repli unpkg, sinon fuseau du navigateur.
+let tzlookup = null;
+const tzReady = import('../vendor/tz-lookup.js')
+  .then((m) => {
+    tzlookup = m.default;
+  })
+  .catch(
+    () =>
+      new Promise((resolve) => {
+        const sc = document.createElement('script');
+        sc.src = 'https://unpkg.com/@photostructure/tz-lookup@11.8.0/tz.js';
+        sc.onload = () => {
+          if (typeof window.tzlookup === 'function') tzlookup = window.tzlookup;
+          resolve();
+        };
+        sc.onerror = () => resolve();
+        document.head.appendChild(sc);
+      }),
+  );
+
 function tzFor(lat, lng) {
   try {
-    const tz = tzlookup(lat, lng);
+    const tz = tzlookup ? tzlookup(lat, lng) : null;
     return isValidTimeZone(tz) ? tz : browserTimeZone();
   } catch {
     return browserTimeZone();
@@ -573,3 +592,12 @@ function syncHash() {
 // Premier affichage (la carte déclenchera aussi refreshAll à 'ready').
 refreshAll();
 if (state.point) setPoint(state.point);
+tzReady.then(() => {
+  if (!state.tzAuto || !tzlookup) return;
+  const c = map.getCenter();
+  const tz = tzFor(c.lat, c.lng);
+  if (tz !== state.tz) {
+    state.tz = tz;
+    refreshAll();
+  }
+});

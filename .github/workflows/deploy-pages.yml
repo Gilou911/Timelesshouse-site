@@ -25,7 +25,9 @@ jobs:
         with:
           node-version: 22
       - name: Tests unitaires
-        run: npm ci && npm test
+        run: npm install --no-audit --no-fund && npm test
+      - name: Générer vendor/ (MapLibre, tz-lookup) si absent
+        run: npm run vendor
       - name: Préparer le site
         run: |
           mkdir -p _site

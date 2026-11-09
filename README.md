@@ -20,6 +20,10 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 Le site est 100 % statique et **fonctionne depuis n'importe quel sous-dossier** (tous les chemins sont relatifs).
 Les fichiers à publier : `index.html`, `manifest.webmanifest`, `assets/`, `css/`, `js/`, `vendor/`.
 
+Si `vendor/` ne contient pas `maplibre-gl.js` (dépôt récupéré sans les fichiers minifiés), lancez `npm install && npm run vendor`
+avant de copier. Le workflow « Vendor » le fait aussi automatiquement sur GitHub si les permissions d'écriture des workflows
+sont activées ; et à défaut, la page charge MapLibre et tz-lookup depuis unpkg en repli.
+
 ### Option A — un dossier sur le serveur qui sert déjà perso.timelesshouse.org
 
 Copiez ces fichiers dans un sous-dossier du site, par exemple `ombres/`, et l'application répond sur

@@ -1,0 +1,38 @@
+# Si vendor/maplibre-gl.js manque sur la branche (dépôt poussé sans les fichiers minifiés),
+# ce workflow le régénère depuis package-lock.json et le commet. Nécessite dans Settings → Actions →
+# General → Workflow permissions : « Read and write permissions ». Sinon, lancez `npm run vendor` en local.
+name: Vendor
+
+on:
+  push:
+    paths-ignore:
+      - 'vendor/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fichiers déjà présents ?
+        id: check
+        run: |
+          if [ -f vendor/maplibre-gl.js ] && [ -f vendor/tz-lookup.js ]; then echo "missing=false" >> "$GITHUB_OUTPUT"; else echo "missing=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.missing == 'true'
+        with:
+          node-version: 22
+      - name: Générer vendor/
+        if: steps.check.outputs.missing == 'true'
+        run: npm install --no-audit --no-fund && npm run vendor
+      - name: Commiter vendor/
+        if: steps.check.outputs.missing == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vendor
+          git commit -m "Génère vendor/ (MapLibre, tz-lookup) depuis package-lock.json"
+          git push
