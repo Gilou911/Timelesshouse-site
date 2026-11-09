@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sunPosition, dayInfo, timesForZenith, shadowLength, refraction } from '../../js/sun.js';
+import { sunPosition, dayInfo, timesForZenith, shadowLength, refraction, lightBands } from '../../js/sun.js';
 
 // Valeurs de référence calculées avec pvlib 0.16 (algorithme NREL SPA).
 const CASES = [
@@ -33,8 +33,50 @@ test('lever/coucher Paris 21 juin 2026 (heure d\'été UTC+2)', () => {
   assert.ok(Math.abs(rise - (5 * 60 + 47)) <= 2, `lever ${rise}`);
   assert.ok(Math.abs(set - (21 * 60 + 58)) <= 2, `coucher ${set}`);
   assert.ok(d.dayLengthMinutes > 16 * 60 && d.dayLengthMinutes < 16.3 * 60, `durée ${d.dayLengthMinutes}`);
-  assert.ok(d.goldenMorningEnd > d.sunrise && d.goldenEveningStart < d.sunset);
-  assert.ok(d.civilDawn < d.sunrise && d.civilDusk > d.sunset);
+});
+
+const KEYS = ['night', 'blue', 'golden', 'day'];
+const LIMIT = { 'night|blue': -6, 'blue|golden': -4, 'golden|day': 6 };
+/** Bandes d'un jour civil (minuit à minuit, décalage UTC fixe en heures) et contrôles communs. */
+function bandsOf(isoDay, offsetHours, lat, lng) {
+  const start = new Date(Date.parse(`${isoDay}T00:00:00Z`) - offsetHours * 3600000);
+  const end = new Date(start.getTime() + 86400000);
+  const bands = lightBands(start, end, lat, lng);
+  assert.equal(bands[0].from.getTime(), start.getTime(), 'la première bande part de minuit');
+  assert.equal(bands.at(-1).to.getTime(), end.getTime(), 'la dernière bande finit à minuit');
+  for (let i = 1; i < bands.length; i++) {
+    const [a, b] = [bands[i - 1], bands[i]];
+    assert.equal(a.to.getTime(), b.from.getTime(), 'bandes contiguës');
+    assert.notEqual(a.key, b.key, 'deux bandes voisines diffèrent');
+    // À chaque limite, le soleil est bien à l'élévation qui la définit (interpolation entre échantillons de 4 min).
+    const lim = LIMIT[[a.key, b.key].sort((x, y) => KEYS.indexOf(x) - KEYS.indexOf(y)).join('|')];
+    assert.ok(lim !== undefined, `on ne saute pas de bande : ${a.key} → ${b.key}`);
+    const alt = sunPosition(b.from, lat, lng).altitude;
+    assert.ok(Math.abs(alt - lim) < 0.02, `${a.key} → ${b.key} à ${b.from.toISOString()} : élévation ${alt.toFixed(3)}° pour ${lim}°`);
+  }
+  return bands;
+}
+const local = (d, offsetHours) => new Date(d.getTime() + offsetHours * 3600000).toISOString().slice(11, 16);
+
+test('bandes de lumière, Paris au solstice d\'été : nuit, bleue, dorée, jour, dorée, bleue, nuit', () => {
+  const bands = bandsOf('2026-06-21', 2, 48.8566, 2.3522);
+  assert.deepEqual(bands.map((b) => b.key), ['night', 'blue', 'golden', 'day', 'golden', 'blue', 'night']);
+  // Le lever (05:47) et le coucher (21:58) tombent dans les heures dorées ; l'heure bleue dure une vingtaine de minutes.
+  assert.ok(local(bands[2].from, 2) < '05:47' && local(bands[2].to, 2) > '05:47', `heure dorée du matin ${local(bands[2].from, 2)}–${local(bands[2].to, 2)}`);
+  assert.ok(local(bands[4].from, 2) < '21:58' && local(bands[4].to, 2) > '21:58', `heure dorée du soir ${local(bands[4].from, 2)}–${local(bands[4].to, 2)}`);
+  const blueMin = (bands[5].to - bands[5].from) / 60000;
+  assert.ok(blueMin > 15 && blueMin < 30, `heure bleue du soir : ${blueMin} min`);
+});
+
+test('bandes de lumière aux hautes latitudes : nuit polaire, jour polaire, nuit blanche', () => {
+  // Tromsø, 21 décembre : le soleil culmine vers −3° : de l'heure dorée à midi, aucun « jour ».
+  const tromso = bandsOf('2026-12-21', 1, 69.6492, 18.9553).map((b) => b.key);
+  assert.ok(!tromso.includes('day') && tromso.includes('golden') && tromso[0] === 'night', tromso.join(' '));
+  // Longyearbyen, 21 juin : soleil toujours au-dessus de +6°.
+  assert.deepEqual(bandsOf('2026-06-21', 2, 78.2232, 15.6267).map((b) => b.key), ['day']);
+  // Arkhangelsk, 21 juin : le soleil ne descend qu'à −2° : ni nuit ni heure bleue.
+  const ark = bandsOf('2026-06-21', 3, 64.5401, 40.5433).map((b) => b.key);
+  assert.ok(!ark.includes('night') && !ark.includes('blue') && ark.includes('golden'), ark.join(' '));
 });
 
 test('nuit polaire à Tromsø, jour polaire à Longyearbyen', () => {

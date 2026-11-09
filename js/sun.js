@@ -163,14 +163,11 @@ export function solarNoon(noonUTC, lat, lng) {
 }
 
 /**
- * Résumé du jour : lever, coucher, midi solaire, crépuscules, heures dorées.
+ * Résumé du jour : lever, coucher, midi solaire, durée du jour.
  * `noonUTC` doit être le midi (heure civile locale) du jour voulu, exprimé en Date.
  */
 export function dayInfo(noonUTC, lat, lng) {
   const sun = timesForZenith(noonUTC, lat, lng, SUNRISE_ZENITH);
-  const civil = timesForZenith(noonUTC, lat, lng, 96); // -6°
-  const golden = timesForZenith(noonUTC, lat, lng, 84); // +6°
-  const blue = timesForZenith(noonUTC, lat, lng, 94); // -4°
   const noon = solarNoon(noonUTC, lat, lng);
   const noonPos = sunPosition(noon, lat, lng);
   let dayLengthMin = null;
@@ -184,13 +181,40 @@ export function dayInfo(noonUTC, lat, lng) {
     solarNoon: noon,
     noonAltitude: noonPos.altitude,
     dayLengthMinutes: dayLengthMin,
-    civilDawn: civil.rise,
-    civilDusk: civil.set,
-    goldenMorningEnd: golden.rise,
-    goldenEveningStart: golden.set,
-    blueMorningStart: blue.rise,
-    blueEveningEnd: blue.set,
   };
+}
+
+// Limites des bandes de lumière, en élévation apparente (celle de lightPhase) : nuit | bleue | dorée | jour.
+const BAND_LIMITS = [-6, -4, 6];
+const BAND_KEYS = ['night', 'blue', 'golden', 'day'];
+const bandIndex = (alt) => BAND_LIMITS.filter((l) => alt >= l).length;
+
+/**
+ * Bandes de lumière entre deux instants : nuit, heure bleue (−6° à −4°), heure dorée (−4° à +6°), jour.
+ * Élévation échantillonnée toutes les `stepMinutes`, chaque limite franchie interpolée entre deux échantillons :
+ * jours polaires, nuits blanches et jours de changement d'heure n'ont pas de cas à part.
+ * @returns {{key:'night'|'blue'|'golden'|'day', from:Date, to:Date}[]} contiguës, de `start` à `end`
+ */
+export function lightBands(start, end, lat, lng, stepMinutes = 4) {
+  const t1 = end.getTime();
+  let prevT = start.getTime();
+  let prevAlt = sunPosition(start, lat, lng).altitude;
+  const bands = [{ key: BAND_KEYS[bandIndex(prevAlt)], from: prevT, to: t1 }];
+  while (prevT < t1) {
+    const t = Math.min(prevT + stepMinutes * 60000, t1);
+    const alt = sunPosition(new Date(t), lat, lng).altitude;
+    const a = bandIndex(prevAlt);
+    const b = bandIndex(alt);
+    for (let i = a; i !== b; i += Math.sign(b - a)) {
+      const lim = BAND_LIMITS[b > a ? i : i - 1];
+      const tc = prevT + ((lim - prevAlt) / (alt - prevAlt)) * (t - prevT);
+      bands[bands.length - 1].to = tc;
+      bands.push({ key: BAND_KEYS[b > a ? i + 1 : i - 1], from: tc, to: t1 });
+    }
+    prevT = t;
+    prevAlt = alt;
+  }
+  return bands.map((x) => ({ key: x.key, from: new Date(x.from), to: new Date(x.to) }));
 }
 
 /** Longueur d'ombre (m) d'un objet de hauteur h (m) pour une élévation solaire (degrés). Infinity si soleil couché. */

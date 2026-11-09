@@ -25,6 +25,11 @@
   --dawn: #ff9500;
   --day: #ffcc00;
   --night: rgba(10, 10, 19, 0.12);
+  /* Bandes de lumière de la frise : l'heure bleue en indigo, loin du bleu des commandes ; le reste aux couleurs du soleil. */
+  --band-night: var(--night);
+  --band-blue: #5856d6;
+  --band-golden: var(--dawn);
+  --band-day: var(--day);
   --shadow: 0 1px 2px rgba(17, 17, 50, 0.06), 0 20px 40px rgba(17, 17, 50, 0.1);
   --blur: saturate(160%) blur(20px);
   /* Deux rayons : 8 px pour tout ce qui se touche (jamais de gélule), 12 px pour les surfaces. */
@@ -69,6 +74,7 @@
     --dawn: #ff9f0a;
     --day: #ffd60a;
     --night: rgba(163, 163, 179, 0.18);
+    --band-blue: #5e5ce6;
     --shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
   }
 }
@@ -200,8 +206,12 @@ body {
 /* Le reste de la journée, en lignes : libellé à gauche, valeur à droite, un filet entre deux. */
 .rows { margin: 0; }
 .rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--hairline); }
-.rows dt { font-size: 0.875rem; color: var(--text-2); }
+.rows dt { font-size: 0.875rem; color: var(--text-2); white-space: nowrap; }
 .rows dd { margin: 0; font-size: 0.9375rem; text-align: right; font-variant-numeric: tabular-nums; }
+/* Légende de la frise : la couleur de la bande devant son nom. */
+.swatch { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 2px; vertical-align: -1px; }
+.swatch.golden { background: var(--band-golden); }
+.swatch.blue { background: var(--band-blue); }
 
 .hint { margin: 0; font-size: 0.875rem; color: var(--text-2); line-height: 1.5; }
 .exposure-total { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
@@ -307,7 +317,7 @@ body {
 .slider-row { position: relative; flex: 1; min-width: 0; }
 /* Heure de la cérémonie : un trait d'encre au-dessus de la piste, sous le pouce (centre du pouce = 11 px + (largeur − 22 px) × part du jour). */
 .event-mark {
-  position: absolute; top: calc(var(--hit) / 2 - 14px); left: calc(11px + (100% - 22px) * var(--at, 0)); width: 2px; height: 11px;
+  position: absolute; top: calc(var(--hit) / 2 - 15px); left: calc(11px + (100% - 22px) * var(--at, 0)); width: 2px; height: 11px;
   margin-left: -1px; border-radius: 1px; background: var(--text); pointer-events: none;
 }
 .slider-row #time { position: relative; z-index: 1; }
@@ -316,10 +326,10 @@ body {
   -webkit-appearance: none; appearance: none; display: block; width: 100%; height: var(--hit); margin: 0;
   background: transparent; cursor: pointer;
 }
-#time::-webkit-slider-runnable-track { height: 6px; border-radius: 2px; background: var(--daylight, var(--night)); }
-#time::-moz-range-track { height: 6px; border-radius: 2px; background: var(--daylight, var(--night)); }
+#time::-webkit-slider-runnable-track { height: 8px; border-radius: 2px; background: var(--daylight, var(--night)); }
+#time::-moz-range-track { height: 8px; border-radius: 2px; background: var(--daylight, var(--night)); }
 #time::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 22px; height: 22px; margin-top: -8px; border: 0; border-radius: 50%; background: #fff;
+  -webkit-appearance: none; width: 22px; height: 22px; margin-top: -7px; border: 0; border-radius: 50%; background: #fff;
   box-shadow: 0 0 0 1px rgba(10, 10, 19, 0.12), 0 4px 12px rgba(0, 0, 0, 0.25); cursor: grab;
 }
 #time::-moz-range-thumb {

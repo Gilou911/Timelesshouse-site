@@ -1,6 +1,6 @@
 // Interface « Ombres » : date/heure, recherche, panneau soleil, ensoleillement d'un point, état dans l'URL.
 import { ShadowMap, STYLES } from './map.js';
-import { sunPosition, dayInfo, lightPhase, shadowLength } from './sun.js';
+import { sunPosition, dayInfo, lightPhase, shadowLength, lightBands } from './sun.js';
 import {
   browserTimeZone, isValidTimeZone, wallToUTC, minutesOfDay, tzLabel, formatMinutes, formatTime, formatDateISO, formatDuration,
 } from './tz.js';
@@ -12,7 +12,7 @@ const ui = {
   search: $('search'), searchInput: $('search-input'), results: $('results'), locate: $('locate'),
   panel: $('panel'), panelToggle: $('panel-toggle'),
   phase: $('phase'), azimuth: $('azimuth'), altitude: $('altitude'), altitudeNote: $('altitude-note'), sunrise: $('sunrise'), sunset: $('sunset'),
-  noon: $('noon'), daylength: $('daylength'), golden: $('golden'), shadowRatio: $('shadow-ratio'),
+  noon: $('noon'), daylength: $('daylength'), golden: $('golden'), blue: $('blue'), shadowRatio: $('shadow-ratio'),
   exposureHint: $('exposure-hint'), exposure: $('exposure'), exposureHours: $('exposure-hours'), exposureList: $('exposure-list'),
   exposureBar: $('exposure-bar'), exposureMeta: $('exposure-meta'), exposureClear: $('exposure-clear'),
   toggleShadows: $('toggle-shadows'), toggleBuildings: $('toggle-buildings'), toggleTerrain: $('toggle-terrain'),
@@ -178,33 +178,33 @@ function refreshDay() {
   }
   ui.noon.textContent = `${t(day.solarNoon)} (${fmtDeg(day.noonAltitude, 1)})`;
   ui.daylength.textContent = formatDuration(day.dayLengthMinutes);
-  ui.golden.textContent =
-    day.goldenMorningEnd && day.goldenEveningStart ? `≤ ${t(day.goldenMorningEnd)} · ≥ ${t(day.goldenEveningStart)}` : '—';
 
-  // Dégradé du curseur : nuit / crépuscule / jour.
-  const pct = (d, fallback) => {
-    const m = minutesInDay(d);
-    return `${(((m == null ? fallback : m) / 1440) * 100).toFixed(2)}%`;
+  // Frise du curseur : nuit, heure bleue, heure dorée, jour, en bandes nettes, de minuit à minuit (heure civile).
+  const { y, mo, d } = dateParts();
+  const next = new Date(Date.UTC(y, mo - 1, d + 1));
+  const bands = lightBands(
+    wallToUTC(state.tz, y, mo, d, 0, 0),
+    wallToUTC(state.tz, next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), 0, 0),
+    c.lat,
+    c.lng,
+  );
+  // Une bande s'arrête là où le pouce du curseur montre cette heure : 11 px (demi-pouce) + part du jour × (piste − 22 px).
+  const at = (date) => {
+    const f = Math.min(1, Math.max(0, minutesInDay(date) / 1439));
+    return `calc(11px + ${(f * 100).toFixed(3)}% - ${(22 * f).toFixed(2)}px)`;
   };
-  // Couleurs du thème (clair ou sombre), résolues par la feuille de style.
-  const night = 'var(--night)';
-  const dawn = 'var(--dawn)';
-  const dayc = 'var(--day)';
-  let bg;
-  if (day.status === 'polar-day') bg = dayc;
-  else if (day.status === 'polar-night') bg = night;
-  else {
-    // Soleil jamais au-dessus de +6° : la « journée » reste dorée (repères au midi solaire) ;
-    // jamais sous −6° (nuits blanches) : le crépuscule civil s'étend jusqu'aux bornes du jour.
-    const gMorning = day.goldenMorningEnd || day.solarNoon;
-    const gEvening = day.goldenEveningStart || day.solarNoon;
-    bg = `linear-gradient(90deg, ${night} 0%, ${night} ${pct(day.civilDawn, 0)}, ${dawn} ${pct(day.sunrise, 0)}, ${dayc} ${pct(gMorning, 0)}, ${dayc} ${pct(gEvening, 1440)}, ${dawn} ${pct(day.sunset, 1440)}, ${night} ${pct(day.civilDusk, 1440)}, ${night} 100%)`;
-  }
-  ui.time.style.setProperty('--daylight', bg);
+  ui.time.style.setProperty('--daylight', `linear-gradient(90deg, ${bands.map((b) => `var(--band-${b.key}) ${at(b.from)} ${at(b.to)}`).join(', ')})`);
+  const ranges = (key) => {
+    const list = bands.filter((b) => b.key === key);
+    if (!list.length) return '—';
+    // Un créneau ne se coupe jamais (gluon après le tiret) : faute de place, la ligne passe entre le matin et le soir.
+    return bands.length === 1 ? 'toute la journée' : list.map((b) => `${t(b.from)}–⁠${t(b.to)}`).join(' · ');
+  };
+  ui.golden.textContent = ranges('golden');
+  ui.blue.textContent = ranges('blue');
 
   // Positions horaires pour le tracé.
   hourPositions = [];
-  const { y, mo, d } = dateParts();
   for (let h = 0; h < 24; h++) {
     const p = sunPosition(wallToUTC(state.tz, y, mo, d, h, 0), c.lat, c.lng);
     hourPositions.push({ label: `${h}h`, azimuth: p.azimuth, altitude: p.altitude });
