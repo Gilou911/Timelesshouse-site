@@ -104,8 +104,8 @@
 
   <footer class="timebar" aria-label="Date et heure">
     <div class="day-row">
-      <input type="date" id="date" aria-label="Date">
-      <button type="button" id="now" class="btn small">Maintenant</button>
+      <input type="date" id="date" min="1900-01-01" max="2100-12-31" aria-label="Date">
+      <button type="button" id="now" class="btn small" title="Revenir à la date et à l'heure actuelles">Maintenant</button>
       <span id="tz-label" class="tz-label">—</span>
     </div>
     <div class="time-row">

@@ -4,9 +4,13 @@ import {
   DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, depthToRGBA, pointExposure, rowScaleFactors,
   exposureToRGBA, renderShadows, sunIsUp,
 } from './shadow-engine.js';
+import { canDecodePNG, decodePNG } from './png.js';
 
-// Décodage des tuiles PNG dans le worker : OffscreenCanvas + createImageBitmap (Safari ≥ 16.4, Chrome, Firefox).
-const CAN_DECODE = typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap !== 'undefined';
+// Décodage des tuiles PNG dans le worker. Le décodeur maison (png.js) passe en premier : il rend les octets
+// exacts du fichier. Le canvas ne sert que de repli, et seulement s'il relit fidèlement ce qu'on y dessine.
+let canvasDistorted = null; // null : pas encore testé
+const CAN_CANVAS = typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap !== 'undefined';
+const CAN_DECODE = canDecodePNG || (CAN_CANVAS && !canvasIsDistorted());
 let spareBuffer = null; // tampon RGBA recyclé par la page (évite une allocation de plusieurs Mo par image)
 
 const TILE_SIZE = 256;
@@ -30,14 +34,59 @@ function touchCache(key, value) {
   if (tileCache.size > MAX_CACHE) tileCache.delete(tileCache.keys().next().value);
 }
 
-async function decodeBlob(blob) {
-  const bmp = await createImageBitmap(blob);
-  const canvas = new OffscreenCanvas(bmp.width, bmp.height);
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+/**
+ * Les protections anti-empreinte (Brave, Firefox avec resistFingerprinting) bruitent la relecture d'un canvas.
+ * Un écart de 1 sur le canal rouge vaut 256 m : mieux vaut pas de relief qu'un relief faux.
+ */
+function canvasIsDistorted() {
+  if (canvasDistorted !== null) return canvasDistorted;
+  canvasDistorted = false;
+  try {
+    const size = 5;
+    const ctx = new OffscreenCanvas(size, size).getContext('2d', { willReadFrequently: true });
+    for (let i = 0; i < size * size; i++) {
+      const b = i * 4;
+      ctx.fillStyle = `rgb(${b},${b + 1},${b + 2})`;
+      ctx.fillRect(i % size, Math.floor(i / size), 1, 1);
+    }
+    const data = ctx.getImageData(0, 0, size, size).data;
+    for (let i = 0; i < data.length; i++) {
+      if (i % 4 !== 3 && data[i] !== i) {
+        canvasDistorted = true;
+        break;
+      }
+    }
+  } catch {
+    canvasDistorted = true;
+  }
+  return canvasDistorted;
+}
+
+async function decodeWithCanvas(blob) {
+  const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+  const { width, height } = bmp;
+  const ctx = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true });
   ctx.drawImage(bmp, 0, 0);
-  const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
   bmp.close();
-  return decodeTerrarium(img.data);
+  return { width, height, rgba: ctx.getImageData(0, 0, width, height).data };
+}
+
+async function decodeBlob(blob) {
+  let img = null;
+  if (canDecodePNG) {
+    try {
+      img = await decodePNG(new Uint8Array(await blob.arrayBuffer()));
+    } catch {
+      // format hors du décodeur maison (16 bits, entrelacé, autre type d'image) : repli sur le canvas
+    }
+  }
+  if (!img) {
+    if (!CAN_CANVAS || canvasIsDistorted()) throw new Error('Tuile de relief illisible');
+    img = await decodeWithCanvas(blob);
+  }
+  // La mosaïque suppose des tuiles carrées de TILE_SIZE pixels : une autre taille serait lue de travers.
+  if (img.width !== TILE_SIZE || img.height !== TILE_SIZE) throw new Error('Taille de tuile inattendue');
+  return decodeTerrarium(img.rgba);
 }
 
 function fetchTile(z, x, y) {

@@ -17,7 +17,20 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 
 ## Mettre en ligne sur perso.timelesshouse.org
 
-Le site est 100 % statique et **fonctionne depuis n'importe quel sous-dossier** (tous les chemins sont relatifs).
+**En ligne depuis le 09/11/2026 : https://perso.timelesshouse.org/ombres/**, quatrième carte de l'accueil du site perso. C'est
+le Worker « moodboard » du dépôt `Gilou911/timelesshouse-website` qui la sert, à partir d'une copie dans
+`moodboard/public/ombres/`, avec sa propre politique de sécurité dans `moodboard/public/_headers`. Pour publier une
+nouvelle version, depuis une branche tirée de `main` de ce dépôt (un worktree, jamais le checkout principal) :
+
+```bash
+scripts/copier-vers-perso.sh <checkout>/moodboard/public/ombres   # recopie, supprime les fichiers disparus, garde apercu.jpg
+```
+
+Ensuite : PR sur `main`, fusion, puis déploiement depuis `main`, comme le décrit le README de `moodboard/`. Si le design
+change, refaire aussi `apercu.jpg`, la capture qui illustre la carte d'accueil.
+
+Les options ci-dessous restent valables pour un autre hébergement. Le site est 100 % statique et **fonctionne depuis
+n'importe quel sous-dossier** (tous les chemins sont relatifs).
 Les fichiers à publier : `index.html`, `manifest.webmanifest`, `assets/`, `css/`, `js/`, `vendor/`.
 
 Si `vendor/` ne contient pas `maplibre-gl.js` (dépôt récupéré sans les fichiers minifiés), lancez `npm install && npm run vendor`
@@ -34,6 +47,8 @@ Exemples de configuration si vous servez vous-même :
 
 ```nginx
 # nginx
+# Sans barre finale, les chemins relatifs partiraient de la racine du site : on redirige.
+location = /ombres { return 301 /ombres/; }
 location /ombres/ {
     alias /var/www/ombres/;
     try_files $uri $uri/ /ombres/index.html;
@@ -46,6 +61,7 @@ location ^~ /ombres/vendor/ { alias /var/www/ombres/vendor/; add_header Cache-Co
 
 ```caddyfile
 # Caddy
+redir /ombres /ombres/ 301
 handle_path /ombres/* {
     root * /var/www/ombres
     @vendor path /vendor/*
@@ -72,6 +88,23 @@ Le dépôt contient un workflow `.github/workflows/deploy-pages.yml` :
 Un domaine personnalisé GitHub Pages occupe tout le nom d'hôte : si `perso.timelesshouse.org` est déjà servi par une
 autre application, il faut soit l'option A, soit un autre sous-domaine.
 
+### En-têtes de sécurité (facultatif)
+
+L'application tient dans une politique de sécurité de contenu stricte. Celle-ci a été vérifiée dans Chromium avec les
+vrais serveurs de tuiles : plan, bâtiments, relief, satellite et recherche de lieu.
+
+```
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; connect-src 'self' https://tiles.openfreemap.org https://s3.amazonaws.com https://server.arcgisonline.com https://nominatim.openstreetmap.org
+```
+
+- `worker-src blob:` est obligatoire : MapLibre lance ses workers depuis une URL `blob:`. Sans lui, ils sont bloqués.
+- Envoyez l'en-tête sur la page et sur les fichiers de `js/` : le worker des ombres applique la politique reçue avec
+  son propre fichier.
+- La page n'a plus aucun script en ligne : le repli vers unpkg vit dans `js/vendor-fallback.js` et ne sert qu'en
+  l'absence de `vendor/`. Ses requêtes vers unpkg seraient bloquées par cette politique : gardez `vendor/` en place.
+- `Cross-Origin-Embedder-Policy` n'est pas nécessaire : l'application n'utilise pas `SharedArrayBuffer`.
+- Non vérifié dans Firefox ni Safari.
+
 ## Développer et tester
 
 ```bash
@@ -79,7 +112,8 @@ npm install          # dépendances de développement uniquement (MapLibre, tz-l
 npm test             # tests unitaires : position du soleil (référence NREL SPA), moteur d'ombres, fuseaux, URL
 npm run serve        # http://localhost:8787 — fond de carte factice (style OpenFreeMap réel, tuiles de test) et vrai relief
 npm run test:e2e     # Chromium + Playwright : rendu réel, captures dans tests/e2e/out/
-                     # (Playwright n'est pas dans package.json : npm install -D playwright && npx playwright install chromium)
+                     # (Playwright n'est pas dans package.json : npm install -D playwright && npx playwright install chromium ;
+                     #  ou, avec Google Chrome installé : npm install --no-save playwright && E2E_CHROME_CHANNEL=chrome npm run test:e2e)
 npm run vendor       # re-copie maplibre-gl et tz-lookup depuis node_modules vers vendor/
 ```
 
@@ -88,6 +122,18 @@ bâtiments de test à Paris et Chamonix) mais vrai relief, sans dépendre des se
 complète avec OpenFreeMap, servez simplement le dossier avec n'importe quel serveur statique (`npx serve .`,
 `python3 -m http.server`).
 
+Les sources de données se remplacent sans toucher au code : définissez `window.OMBRES_CONFIG` dans un script chargé
+avant `js/app.js`. Toutes les clés sont facultatives.
+
+| Clé | Rôle | Valeur par défaut |
+| --- | --- | --- |
+| `openFreeMap` | Racine du serveur OpenFreeMap : styles, polices, tuiles vectorielles des bâtiments | `https://tiles.openfreemap.org` |
+| `planStyle` | URL du style du fond « Plan » | style `bright` d'OpenFreeMap |
+| `satelliteStyle` | URL d'un style complet pour le fond « Satellite » | style construit autour de `esriUrl` |
+| `esriUrl` | Gabarit d'URL des tuiles d'imagerie | Esri World Imagery |
+| `demUrl` | Gabarit d'URL des tuiles de relief, au format Terrarium | Terrain Tiles sur AWS |
+| `idleFallbackMs` | Délai, en millisecondes, avant de calculer les ombres quand une tuile du fond ne répond pas | `6000` |
+
 ## Comment ça marche
 
 1. **Soleil** (`js/sun.js`) : algorithme NOAA (Meeus) — azimut, élévation avec réfraction, lever/coucher, crépuscules.
@@ -95,6 +141,8 @@ complète avec OpenFreeMap, servez simplement le dossier avec n'importe quel ser
 2. **Champ de hauteurs** (`js/shadow-worker.js`) : pour la vue courante (plus une marge de 30 %), le worker télécharge
    les tuiles de relief Terrarium, les échantillonne en bilinéaire, puis rasterise les emprises de bâtiments
    (hauteur `render_height` des tuiles OpenMapTiles) avec un toit plat posé sur le relief.
+   Le calcul part quand la carte a fini de charger. Si une tuile du fond reste muette, il part quand même au bout
+   de 6 secondes, puis il est refait quand les tuiles en retard arrivent.
 3. **Ombres** (`js/shadow-engine.js`) : balayage de la grille dans la direction opposée au soleil ; chaque cellule
    est à l'ombre si la ligne d'horizon portée depuis le soleil passe au-dessus d'elle. Coût linéaire en nombre de
    cellules, donc un rendu en quelques dizaines de millisecondes même en 1 000 × 1 000.
@@ -126,4 +174,6 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - Les arbres ne sont pas pris en compte.
 - À l'échelle d'un pays ou d'un continent, la direction du soleil est celle du centre de la carte ; seule la limite
   jour/nuit (terminateur) est calculée point par point.
+- Quand la vue est plus large que le monde, la grille couvre exactement un tour de la Terre et la carte la répète
+  de chaque côté. Le relief n'est alors qu'esquissé : une cellule fait plusieurs dizaines de kilomètres.
 - Les zones sous le niveau de la mer (mer Morte, polders) sont ramenées à 0 m pour ne pas faire de la côte une falaise.

@@ -12,7 +12,7 @@ function crc32(buf) {
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ -1) >>> 0;
 }
-function chunk(type, data) {
+export function chunk(type, data) {
   const len = Buffer.alloc(4);
   len.writeUInt32BE(data.length);
   const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
