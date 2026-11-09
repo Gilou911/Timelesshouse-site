@@ -24,25 +24,24 @@ const ui = {
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
 const DEFAULT_VIEW = { lat: 48.8566, lng: 2.3522, zoom: 15.3 };
 
-// tz-lookup (lat/lng → fuseau IANA) : version embarquée dans vendor/, sinon repli unpkg, sinon fuseau du navigateur.
+// tz-lookup (lat/lng → fuseau IANA) : version embarquée dans vendor/ (chargée avant l'initialisation),
+// sinon repli unpkg chargé en arrière-plan, sinon fuseau du navigateur.
 let tzlookup = null;
-const tzReady = import('../vendor/tz-lookup.js')
-  .then((m) => {
-    tzlookup = m.default;
-  })
-  .catch(
-    () =>
-      new Promise((resolve) => {
-        const sc = document.createElement('script');
-        sc.src = 'https://unpkg.com/@photostructure/tz-lookup@11.8.0/tz.js';
-        sc.onload = () => {
-          if (typeof window.tzlookup === 'function') tzlookup = window.tzlookup;
-          resolve();
-        };
-        sc.onerror = () => resolve();
-        document.head.appendChild(sc);
-      }),
-  );
+let tzReady = Promise.resolve();
+try {
+  tzlookup = (await import('../vendor/tz-lookup.js')).default;
+} catch {
+  tzReady = new Promise((resolve) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://unpkg.com/@photostructure/tz-lookup@11.8.0/tz.js';
+    sc.onload = () => {
+      if (typeof window.tzlookup === 'function') tzlookup = window.tzlookup;
+      resolve();
+    };
+    sc.onerror = () => resolve();
+    document.head.appendChild(sc);
+  });
+}
 
 function tzFor(lat, lng) {
   try {
@@ -240,7 +239,9 @@ function refreshSun() {
   ui.shadowRatio.textContent = isFinite(ratio) ? `${ratio >= 100 ? '> 100' : ratio.toFixed(1).replace('.', ',')} × la hauteur` : 'aucune (nuit)';
   ui.timeLabel.textContent = formatMinutes(state.minutes);
   ui.tzLabel.textContent = `${tzLabel(state.tz, t)} · ${state.tz.replace(/_/g, ' ')}`;
+  ui.tzLabel.title = state.tz;
   ui.time.value = String(state.minutes);
+  ui.time.setAttribute('aria-valuetext', formatMinutes(state.minutes));
   ui.date.value = state.date;
   shadowMap.setSunPath(c, hourPositions, { azimuth: pos.azimuth, altitude: pos.altitude });
 }
@@ -352,6 +353,11 @@ map.on('moveend', () => {
 });
 shadowMap.on('heightfield', (stats) => {
   debug.stats = stats;
+  if (stats.tilesMissing > 0 && stats.tilesLoaded === 0) {
+    setStatus('Relief indisponible (tuiles non chargées) : seules les ombres des bâtiments sont calculées.', true);
+    if (state.point) computeExposure();
+    return;
+  }
   const parts = [];
   parts.push(`relief ${stats.tilesLoaded} tuile${stats.tilesLoaded > 1 ? 's' : ''}${stats.tilesMissing ? ` (${stats.tilesMissing} manquante${stats.tilesMissing > 1 ? 's' : ''})` : ''}`);
   parts.push(`${stats.buildings} bâtiment${stats.buildings > 1 ? 's' : ''}`);
@@ -410,9 +416,10 @@ ui.now.addEventListener('click', () => {
 let playTimer = null;
 function setPlaying(on) {
   state.playing = on;
-  ui.play.querySelector('.ic-play').hidden = on;
-  ui.play.querySelector('.ic-pause').hidden = !on;
+  // Les SVG inline n'ont pas de propriété `hidden` : on bascule une classe sur le bouton.
+  ui.play.classList.toggle('playing', on);
   ui.play.setAttribute('aria-label', on ? 'Pause' : 'Lecture');
+  ui.play.setAttribute('aria-pressed', String(on));
   clearInterval(playTimer);
   if (on) {
     playTimer = setInterval(() => {
@@ -426,12 +433,16 @@ function setPlaying(on) {
 ui.play.addEventListener('click', () => setPlaying(!state.playing));
 
 document.addEventListener('keydown', (e) => {
-  const tag = (e.target && e.target.tagName) || '';
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+  const active = document.activeElement;
+  const onBody = !active || active === document.body;
+  const onMap = active && active.classList && active.classList.contains('maplibregl-canvas');
+  // Les raccourcis ne doivent pas voler le focus d'un bouton, d'un champ ou d'un lien.
+  if (!onBody && !onMap) return;
   if (e.code === 'Space') {
     e.preventDefault();
     setPlaying(!state.playing);
-  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+  } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && onBody) {
+    // Sur la carte, les flèches font défiler la vue : on ne les détourne pas.
     e.preventDefault();
     const d = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 60 : 10);
     state.minutes = ((state.minutes + d) % 1440 + 1440) % 1440;
@@ -504,6 +515,7 @@ function showResults(items) {
   for (const it of items) {
     const li = document.createElement('li');
     li.textContent = it.name;
+    li.setAttribute('role', 'option');
     if (it.empty) li.className = 'empty';
     else {
       li.tabIndex = 0;
@@ -547,13 +559,15 @@ ui.exposureClear.addEventListener('click', () => setPoint(null));
 ui.panelToggle.addEventListener('click', () => {
   const collapsed = ui.panel.classList.toggle('collapsed');
   ui.panelToggle.setAttribute('aria-expanded', String(!collapsed));
+  ui.panel.setAttribute('aria-hidden', String(collapsed));
 });
 if (isMobile()) {
   ui.panel.classList.add('collapsed');
   ui.panelToggle.setAttribute('aria-expanded', 'false');
+  ui.panel.setAttribute('aria-hidden', 'true');
 }
 ui.share.addEventListener('click', async () => {
-  syncHash();
+  syncHash(true);
   try {
     await navigator.clipboard.writeText(location.href);
     ui.shareOk.hidden = false;
@@ -569,8 +583,8 @@ function scheduleHash() {
   clearTimeout(hashTimer);
   hashTimer = setTimeout(syncHash, 300);
 }
-function syncHash() {
-  if (state.playing) return;
+function syncHash(force = false) {
+  if (state.playing && !force) return;
   const c = map.getCenter();
   const h = buildHash({
     lat: c.lat,
@@ -591,6 +605,15 @@ function syncHash() {
   if (h !== location.hash) history.replaceState(null, '', h);
 }
 
+// La barre de temps peut dépasser sa hauteur nominale (fuseau long, petit écran) : on mesure sa hauteur réelle.
+const timebar = document.querySelector('.timebar');
+if (timebar && 'ResizeObserver' in window) {
+  const ro = new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--timebar-h', `${Math.ceil(timebar.getBoundingClientRect().height)}px`);
+  });
+  ro.observe(timebar);
+}
+
 // Premier affichage (la carte déclenchera aussi refreshAll à 'ready').
 refreshAll();
 if (state.point) setPoint(state.point);
@@ -599,7 +622,14 @@ tzReady.then(() => {
   const c = map.getCenter();
   const tz = tzFor(c.lat, c.lng);
   if (tz !== state.tz) {
+    // Fuseau connu tardivement (repli CDN) : si l'heure affichée était « maintenant », on la recale dans ce fuseau.
+    const wasNow = !hash.time && !hash.date;
     state.tz = tz;
+    if (wasNow) {
+      const now = new Date();
+      state.date = formatDateISO(state.tz, now);
+      state.minutes = Math.floor(minutesOfDay(state.tz, now));
+    }
     refreshAll();
   }
 });

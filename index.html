@@ -29,7 +29,7 @@
       <button type="button" id="locate" title="Ma position" aria-label="Ma position">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
-      <ul id="results" class="results" hidden></ul>
+      <ul id="results" class="results" role="listbox" aria-label="Résultats de la recherche" aria-live="polite" hidden></ul>
     </form>
     <button id="panel-toggle" class="panel-toggle" type="button" aria-expanded="true" aria-controls="panel" title="Afficher ou masquer le panneau">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></g></svg>
@@ -103,7 +103,7 @@
     <div class="time-row">
       <button type="button" id="play" class="icon-btn" aria-label="Lecture" title="Animer la journée (espace)">
         <svg class="ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z" fill="currentColor"/></svg>
-        <svg class="ic-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
+        <svg class="ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
       </button>
       <input type="date" id="date" aria-label="Date">
       <div class="clock">

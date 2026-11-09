@@ -368,7 +368,18 @@ await scenario('Lecture (animation) et clavier', async () => {
   await page.waitForTimeout(1200);
   const t1 = await page.evaluate(() => window.__ombres.state.minutes);
   assert.ok(t1 > 600, `l'heure avance en lecture : ${t1}`);
+  const icons = await page.evaluate(() => [
+    getComputedStyle(document.querySelector('#play .ic-play')).display,
+    getComputedStyle(document.querySelector('#play .ic-pause')).display,
+  ]);
+  assert.deepEqual(icons, ['none', 'block'], `icônes lecture/pause : ${icons}`);
   await page.click('#play');
+  // Espace sur un bouton focalisé active le bouton, pas la lecture.
+  await page.focus('#now');
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => window.__ombres.state.playing), false, 'espace sur « Maintenant » ne lance pas la lecture');
+  await page.evaluate(() => document.activeElement.blur());
   const frames = await page.evaluate(() => window.__ombres.frames);
   assert.ok(frames > 3, `rendus pendant la lecture : ${frames}`);
   const t2 = await page.evaluate(() => window.__ombres.state.minutes);
