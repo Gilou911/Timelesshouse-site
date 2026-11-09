@@ -98,6 +98,15 @@ function mockStyle(base) {
   };
 }
 
+// Styles OpenFreeMap réels (fixtures téléchargées depuis hyperknot/openfreemap-styles), rebranchés sur les tuiles factices.
+const FIXTURES = join(ROOT, 'tests', 'e2e', 'fixtures');
+function realStyle(name, base) {
+  const file = join(FIXTURES, `ofm-${name}.json`);
+  if (!existsSync(file)) return null;
+  return readFileSync(file, 'utf8').replace(/https:\/\/__TILEJSON_DOMAIN__/g, `${base}/mock/ofm`);
+}
+const onePixelPNG = encodePNG(1, 1, new Uint8Array([0, 0, 0, 0]));
+
 function demTile(z, x, y) {
   const file = join(CACHE, `${z}-${x}-${y}.png`);
   if (existsSync(file)) return readFileSync(file);
@@ -120,6 +129,39 @@ export function startServer(port = 0) {
     if (url.pathname === '/mock/style.json') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(mockStyle(base)));
+    }
+    if ((m = url.pathname.match(/^\/mock\/ofm\/(bright|liberty|positron)\.json$/))) {
+      const body = realStyle(m[1], base);
+      if (!body) {
+        res.writeHead(404);
+        return res.end('fixture manquante');
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(body);
+    }
+    if (url.pathname === '/mock/ofm/planet') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        tilejson: '3.0.0', name: 'mock planet', tiles: [`${base}/mock/vec/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14,
+        vector_layers: [{ id: 'building', fields: { render_height: 'Number', render_min_height: 'Number' } }],
+        attribution: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> (test)',
+      }));
+    }
+    if (/^\/mock\/ofm\/natural_earth\//.test(url.pathname)) {
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      return res.end(rasterTile);
+    }
+    if (/^\/mock\/ofm\/sprites\/.*\.json$/.test(url.pathname)) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end('{}');
+    }
+    if (/^\/mock\/ofm\/sprites\/.*\.png$/.test(url.pathname)) {
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      return res.end(onePixelPNG);
+    }
+    if (/^\/mock\/ofm\/fonts\//.test(url.pathname)) {
+      res.writeHead(200, { 'Content-Type': 'application/x-protobuf' });
+      return res.end(Buffer.alloc(0));
     }
     if ((m = url.pathname.match(/^\/mock\/raster\/(\d+)\/(\d+)\/(\d+)\.png$/))) {
       res.writeHead(200, { 'Content-Type': 'image/png' });

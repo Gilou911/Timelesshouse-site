@@ -21,7 +21,7 @@ const browser = await chromium.launch({
 const failures = [];
 const consoleErrors = [];
 
-async function openPage({ viewport, hash, mobile = false }) {
+async function openPage({ viewport, hash, mobile = false, planStyle, satelliteStyle }) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, isMobile: mobile, hasTouch: mobile, locale: 'fr-FR', timezoneId: 'Europe/Paris' });
   const page = await context.newPage();
   page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
@@ -29,15 +29,15 @@ async function openPage({ viewport, hash, mobile = false }) {
     if (msg.type() === 'error' && !/glyph|font|favicon/i.test(msg.text())) consoleErrors.push(`console: ${msg.text()}`);
   });
   await page.addInitScript(
-    (b) => {
+    ({ b, planStyle, satelliteStyle }) => {
       window.OMBRES_CONFIG = {
         demUrl: `${b}/dem/{z}/{x}/{y}.png`,
-        planStyle: `${b}/mock/style.json`,
-        satelliteStyle: `${b}/mock/style.json`,
+        planStyle: planStyle || `${b}/mock/style.json`,
+        satelliteStyle: satelliteStyle || `${b}/mock/style.json`,
         openFreeMap: b,
       };
     },
-    base,
+    { b: base, planStyle, satelliteStyle },
   );
   await page.goto(`${base}/${hash}`, { waitUntil: 'load' });
   return { page, context };
@@ -284,6 +284,64 @@ await scenario('Extrêmes : monde entier (z1), antiméridien (Fidji), zoom 19 en
   await page.waitForFunction((n) => window.__ombres.frames > n, before, { timeout: 60000 });
   stats = await page.evaluate(() => window.__ombres.stats);
   assert.ok(stats.buildings > 0, `bâtiments à z19 : ${stats.buildings}`);
+  await context.close();
+});
+
+await scenario('Styles OpenFreeMap réels (bright puis liberty) : source, couches, polices, extrusions du style masquées', async () => {
+  const { page, context } = await openPage({
+    viewport: { width: 1100, height: 750 },
+    hash: '#48.8566/2.3522/15.5?d=2026-11-09&t=15:30',
+    planStyle: `${base}/mock/ofm/bright.json`,
+    satelliteStyle: `${base}/mock/ofm/liberty.json`,
+  });
+  const { stats } = await waitForFrame(page, 1);
+  assert.ok(stats.buildings > 100, `bâtiments via le style bright : ${stats.buildings}`);
+  let info = await page.evaluate(() => {
+    const sm = window.__ombres.shadowMap;
+    const layers = sm.map.getStyle().layers.map((l) => l.id);
+    const firstSymbol = sm.map.getStyle().layers.findIndex((l) => l.type === 'symbol');
+    const labels = sm.map.getLayer('ombres-sunpath-labels');
+    return {
+      vectorSource: sm.vectorSource,
+      nbLayers: layers.length,
+      overlayIdx: layers.indexOf('ombres-overlay'),
+      b3dIdx: layers.indexOf('ombres-buildings-3d'),
+      hillIdx: layers.indexOf('ombres-hillshade'),
+      firstSymbol,
+      labelFont: labels ? sm.map.getLayoutProperty('ombres-sunpath-labels', 'text-font') : null,
+      b3dSourceLayer: sm.map.getLayer('ombres-buildings-3d') && sm.map.getLayer('ombres-buildings-3d').sourceLayer,
+    };
+  });
+  assert.equal(info.vectorSource, 'openmaptiles', JSON.stringify(info));
+  assert.ok(info.nbLayers > 100, `couches du style bright : ${info.nbLayers}`);
+  assert.ok(info.overlayIdx > 0 && info.overlayIdx < info.firstSymbol, `overlay sous les étiquettes : ${JSON.stringify(info)}`);
+  assert.ok(info.hillIdx < info.overlayIdx && info.overlayIdx < info.b3dIdx, `ordre ombrage < ombres < bâtiments 3D : ${JSON.stringify(info)}`);
+  assert.ok(Array.isArray(info.labelFont) && info.labelFont.every((f) => typeof f === 'string') && /Noto Sans/.test(info.labelFont[0]), `police ${JSON.stringify(info.labelFont)}`);
+  assert.equal(info.b3dSourceLayer, 'building');
+  await page.waitForTimeout(400);
+  const cov = await overlayCoverage(page);
+  assert.ok(cov.ratio > 0.03, `ombres avec le style bright : ${JSON.stringify(cov)}`);
+  await page.screenshot({ path: join(OUT, 'ofm-bright.png') });
+
+  // Liberty : la couche building-3d du style doit être masquée au profit de la nôtre.
+  const frames0 = await page.evaluate(() => window.__ombres.frames);
+  await page.click('label:has(input[name="style"][value="satellite"])');
+  await page.waitForFunction((n) => window.__ombres.frames > n && window.__ombres.shadowMap.currentGridId !== null, frames0, { timeout: 30000 });
+  await page.waitForTimeout(400);
+  info = await page.evaluate(() => {
+    const m = window.__ombres.shadowMap.map;
+    return {
+      styleB3d: m.getLayer('building-3d') ? m.getLayoutProperty('building-3d', 'visibility') : 'absent',
+      ours: m.getLayer('ombres-buildings-3d') ? m.getLayoutProperty('ombres-buildings-3d', 'visibility') : 'absent',
+      buildings: window.__ombres.stats.buildings,
+    };
+  });
+  assert.equal(info.styleB3d, 'none', `building-3d du style masqué : ${JSON.stringify(info)}`);
+  assert.equal(info.ours, 'visible');
+  assert.ok(info.buildings > 100, `bâtiments via liberty : ${info.buildings}`);
+  const cov2 = await overlayCoverage(page);
+  assert.ok(cov2.ratio > 0.03, `ombres avec liberty : ${JSON.stringify(cov2)}`);
+  await page.screenshot({ path: join(OUT, 'ofm-liberty.png') });
   await context.close();
 });
 
