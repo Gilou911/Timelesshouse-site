@@ -11,7 +11,7 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   search: $('search'), searchInput: $('search-input'), results: $('results'), locate: $('locate'),
   panel: $('panel'), panelToggle: $('panel-toggle'),
-  phase: $('phase'), azimuth: $('azimuth'), altitude: $('altitude'), sunrise: $('sunrise'), sunset: $('sunset'),
+  phase: $('phase'), azimuth: $('azimuth'), altitude: $('altitude'), altitudeNote: $('altitude-note'), sunrise: $('sunrise'), sunset: $('sunset'),
   noon: $('noon'), daylength: $('daylength'), golden: $('golden'), shadowRatio: $('shadow-ratio'),
   exposureHint: $('exposure-hint'), exposure: $('exposure'), exposureHours: $('exposure-hours'), exposureList: $('exposure-list'),
   exposureBar: $('exposure-bar'), exposureMeta: $('exposure-meta'), exposureClear: $('exposure-clear'),
@@ -246,7 +246,8 @@ function refreshSun() {
   const phase = lightPhase(pos.altitude);
   ui.phase.textContent = phase.label;
   ui.azimuth.textContent = `${fmtDeg(pos.azimuth)} ${cardinal(pos.azimuth)}`;
-  ui.altitude.textContent = pos.altitude > 0 ? fmtDeg(pos.altitude, 1) : `${fmtDeg(pos.altitude, 1)} (sous l'horizon)`;
+  ui.altitude.textContent = fmtDeg(pos.altitude, 1);
+  ui.altitudeNote.hidden = pos.altitude > 0;
   const ratio = shadowLength(1, pos.altitude);
   ui.shadowRatio.textContent = isFinite(ratio) ? `${ratio >= 100 ? '> 100' : ratio.toFixed(1).replace('.', ',')} × la hauteur` : 'aucune (nuit)';
   ui.timeLabel.textContent = formatMinutes(state.minutes);

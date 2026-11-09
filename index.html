@@ -41,9 +41,12 @@
   <aside id="panel" class="panel" aria-label="Informations et réglages">
     <section class="card">
       <div class="section-head"><h2>Soleil</h2><span class="phase" id="phase">—</span></div>
-      <dl class="grid2">
+      <!-- Les deux mesures qui changent avec l'heure, en grand ; le reste de la journée en lignes. -->
+      <dl class="figures">
         <div><dt>Azimut</dt><dd id="azimuth">—</dd></div>
-        <div><dt>Élévation</dt><dd id="altitude">—</dd></div>
+        <div><dt>Élévation <span id="altitude-note" hidden>· sous l'horizon</span></dt><dd id="altitude">—</dd></div>
+      </dl>
+      <dl class="rows">
         <div><dt>Lever</dt><dd id="sunrise">—</dd></div>
         <div><dt>Coucher</dt><dd id="sunset">—</dd></div>
         <div><dt>Midi solaire</dt><dd id="noon">—</dd></div>
