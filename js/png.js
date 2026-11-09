@@ -5,15 +5,38 @@
 // Formats pris en charge : non entrelacé, 8 bits (gris, gris+alpha, RVB, RVBA) et palette 1/2/4/8 bits.
 
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-const MAX_PIXELS = 4096 * 4096;
+// Tuiles de relief : 256 px, 512 au plus. Le plafond borne la mémoire qu'une image piégée peut réclamer (4 Mo).
+const MAX_PIXELS = 1024 * 1024;
 const CHANNELS = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 
 export const canDecodePNG = typeof DecompressionStream !== 'undefined' && typeof Response !== 'undefined' && typeof Blob !== 'undefined';
 
-async function inflate(bytes) {
-  // « deflate » désigne ici le format zlib (RFC 1950), celui des blocs IDAT.
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+/** Largeur et hauteur lues dans l'en-tête (IHDR, toujours le premier bloc), sans rien décompresser ; null si ce n'est pas un PNG. */
+export function pngSize(bytes) {
+  if (!(bytes instanceof Uint8Array)) bytes = new Uint8Array(bytes);
+  if (bytes.length < 24) return null;
+  for (let i = 0; i < 8; i++) if (bytes[i] !== SIGNATURE[i]) return null;
+  if (String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]) !== 'IHDR') return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { width: view.getUint32(16), height: view.getUint32(20) };
+}
+
+async function inflate(bytes, limit) {
+  // « deflate » désigne ici le format zlib (RFC 1950), celui des blocs IDAT. La lecture s'arrête à la taille que
+  // l'en-tête annonce : un flux piégé (quelques Ko qui en donnent des Go) ne peut pas épuiser la mémoire.
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate')).getReader();
+  const out = new Uint8Array(limit);
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return out.subarray(0, n);
+    if (n + value.length > limit) {
+      await reader.cancel();
+      throw new Error('PNG plus grand que son en-tête');
+    }
+    out.set(value, n);
+    n += value.length;
+  }
 }
 
 function paeth(a, b, c) {
@@ -131,7 +154,7 @@ export async function decodePNG(bytes) {
   }
   const rowBytes = Math.ceil((width * channels * bitDepth) / 8);
   const bpp = Math.max(1, (channels * bitDepth) >> 3);
-  const raw = unfilterScanlines(await inflate(compressed), rowBytes, bpp, height);
+  const raw = unfilterScanlines(await inflate(compressed, (rowBytes + 1) * height), rowBytes, bpp, height);
 
   const n = width * height;
   const rgba = new Uint8Array(n * 4);

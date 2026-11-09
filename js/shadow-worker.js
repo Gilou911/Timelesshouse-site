@@ -4,7 +4,7 @@ import {
   DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, depthToRGBA, pointExposure, rowScaleFactors,
   exposureToRGBA, renderShadows, sunIsUp,
 } from './shadow-engine.js';
-import { canDecodePNG, decodePNG } from './png.js';
+import { canDecodePNG, decodePNG, pngSize } from './png.js';
 
 // Décodage des tuiles PNG dans le worker. Le décodeur maison (png.js) passe en premier : il rend les octets
 // exacts du fichier. Le canvas ne sert que de repli, et seulement s'il relit fidèlement ce qu'on y dessine.
@@ -72,10 +72,15 @@ async function decodeWithCanvas(blob) {
 }
 
 async function decodeBlob(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  // Taille lue dans l'en-tête avant tout décodage : une tuile qui ne fait pas TILE_SIZE est refusée sans être
+  // décompressée, ni ici ni par le canvas (une image géante épuiserait la mémoire du worker).
+  const size = pngSize(bytes);
+  if (size && (size.width !== TILE_SIZE || size.height !== TILE_SIZE)) throw new Error('Taille de tuile inattendue');
   let img = null;
   if (canDecodePNG) {
     try {
-      img = await decodePNG(new Uint8Array(await blob.arrayBuffer()));
+      img = await decodePNG(bytes);
     } catch {
       // format hors du décodeur maison (16 bits, entrelacé, autre type d'image) : repli sur le canvas
     }

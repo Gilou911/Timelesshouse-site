@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
-import { canDecodePNG, decodePNG, unfilterScanlines } from '../../js/png.js';
+import { canDecodePNG, decodePNG, pngSize, unfilterScanlines } from '../../js/png.js';
 import { decodeTerrarium } from '../../js/shadow-engine.js';
 import { chunk, encodePNG } from '../e2e/png.mjs';
 
@@ -209,6 +209,32 @@ test('fichiers invalides ou hors format : erreur, jamais de pixels inventés', a
   ihdr[9] = 2;
   await assert.rejects(decodePNG(new Uint8Array(Buffer.concat([SIGNATURE, chunk('IHDR', ihdr), chunk('IEND', Buffer.alloc(0))]))), /sans données/);
   assert.throws(() => unfilterScanlines(new Uint8Array(5), 3, 1, 2), /tronqué/);
+});
+
+test('image piégée : taille lue sans décompresser, plafond, flux borné à l\'en-tête', async () => {
+  const good = makePNG({ width: 4, height: 4, colorType: 2, raw: randomBytes(4 * 4 * 3, 3) });
+  assert.deepEqual(pngSize(good), { width: 4, height: 4 });
+  assert.equal(pngSize(new Uint8Array(40)), null, 'pas un PNG');
+  // En-tête démesuré : la taille se lit sans rien décompresser, et le décodeur refuse avant d'allouer quoi que ce soit.
+  const huge = good.slice();
+  new DataView(huge.buffer).setUint32(16, 100000);
+  new DataView(huge.buffer).setUint32(20, 100000);
+  assert.deepEqual(pngSize(huge), { width: 100000, height: 100000 });
+  await assert.rejects(decodePNG(huge), /trop grand/);
+  // Au-delà de 1024 × 1024 : refusé aussi (le plafond était de 4096 × 4096, soit 64 Mo par image).
+  const big = good.slice();
+  new DataView(big.buffer).setUint32(16, 2048);
+  new DataView(big.buffer).setUint32(20, 2048);
+  await assert.rejects(decodePNG(big), /trop grand/);
+  // Bombe de décompression : 2 × 2 pixels annoncés, 8 Mo de zéros compressés en quelques Ko.
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(2, 0);
+  ihdr.writeUInt32BE(2, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const bomb = new Uint8Array(Buffer.concat([SIGNATURE, chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.alloc(8 * 1024 * 1024))), chunk('IEND', Buffer.alloc(0))]));
+  assert.ok(bomb.length < 64 * 1024, `bombe de ${bomb.length} octets`);
+  await assert.rejects(decodePNG(bomb), /plus grand que son en-tête/);
 });
 
 test('tuiles factices des tests de bout en bout : même encodage, mêmes hauteurs', async () => {
