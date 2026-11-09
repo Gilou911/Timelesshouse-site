@@ -7,6 +7,7 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 - Curseur d'heure, choix de la date, lecture animée de la journée, bouton « Maintenant ».
 - Ombres calculées pixel par pixel à partir du relief (Terrain Tiles, 30 m ou mieux) et des hauteurs de bâtiments OpenStreetMap.
 - Panneau soleil : azimut, élévation, lever, coucher, midi solaire, durée du jour, heures dorées, longueur d'ombre.
+- Mode « Heures de soleil » : carte colorée du nombre d'heures de soleil direct reçues en chaque point sur la journée.
 - Clic sur la carte : heures de soleil direct reçues par ce point ce jour-là, avec les créneaux.
 - Course du soleil tracée autour du point (graduations horaires, direction du soleil et de l'ombre).
 - Bâtiments 3D, relief 3D, fond plan ou satellite, intensité des ombres réglable.
@@ -83,7 +84,9 @@ serveur statique (`npx serve .`, `python3 -m http.server`) pour la version compl
 3. **Ombres** (`js/shadow-engine.js`) : balayage de la grille dans la direction opposée au soleil ; chaque cellule
    est à l'ombre si la ligne d'horizon portée depuis le soleil passe au-dessus d'elle. Coût linéaire en nombre de
    cellules, donc un rendu en quelques dizaines de millisecondes même en 1 000 × 1 000.
-4. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
+4. **Heures de soleil** : même balayage répété toutes les 20 minutes de la journée, en cumulant les minutes éclairées
+   par cellule (environ une seconde sur un ordinateur portable).
+5. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
    Le relief et les bâtiments 3D sont des couches MapLibre classiques.
 
 ## Sources de données et crédits
