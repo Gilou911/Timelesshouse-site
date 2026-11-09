@@ -320,3 +320,40 @@ test('coucher de soleil : le nombre de cellules éclairées décroît sans écla
   }
   assert.ok(sawShadows && sawNight, 'ombres longues puis nuit');
 });
+
+test('relief en dévers : pas de stries d\'ombre quand le relief est lu au point exact du rayon (T)', () => {
+  // Plan incliné : descend dans la direction de l'ombre un peu moins vite que le soleil (donc éclairé partout),
+  // avec un fort dévers latéral. Lu à la cellule arrondie, le dévers donnait la même erreur à toute une colonne.
+  const w = 120;
+  const h = 90;
+  const alt = 20;
+  for (const az of [200, 227, 250, 20, 110, 300]) {
+    const ux = -Math.sin((az * Math.PI) / 180);
+    const uy = Math.cos((az * Math.PI) / 180);
+    const along = -0.8 * Math.tan((alt * Math.PI) / 180);
+    const lateral = 2;
+    const T = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) T[y * w + x] = along * (x * ux + y * uy) + lateral * (x * -uy + y * ux);
+    const depth = new Float32Array(w * h);
+    const shaded = () => {
+      let n = 0;
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) if (depth[y * w + x] > 0) n++;
+      return n; // bord exclu : là, faute de voisin, le relief est lu à la cellule
+    };
+    sweepShadows(T, w, h, az, alt, 1, depth);
+    assert.ok(shaded() > 0, `azimut ${az} : le plan doit faire apparaître les stries sans T (sinon le test ne prouve rien)`);
+    // sweepShadows remet `depth` à zéro à chaque appel : le second balayage repart d'un tableau vierge.
+    sweepShadows(T, w, h, az, alt, 1, depth, null, T);
+    assert.equal(shaded(), 0, `azimut ${az} : cellules à l'ombre sur un plan éclairé`);
+  }
+});
+
+test('relief plat (T) : les ombres de bâtiments restent identiques', () => {
+  const { w, h, H, depth } = grid(60, 60);
+  H[30 * w + 30] = 20;
+  H[12 * w + 40] = 8;
+  const ref = new Float32Array(w * h);
+  sweepShadows(H, w, h, 213, 27, 1, ref);
+  sweepShadows(H, w, h, 213, 27, 1, depth, null, new Float32Array(w * h));
+  assert.deepEqual(depth, ref);
+});

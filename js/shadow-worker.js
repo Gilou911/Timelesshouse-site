@@ -209,7 +209,7 @@ async function exposureMap(msg) {
     return;
   }
   const token = ++exposureToken;
-  const { grid, H, depth, cellMeters, rowScale } = current;
+  const { grid, H, T, depth, cellMeters, rowScale } = current;
   const { w, h } = grid;
   const acc = new Float32Array(w * h);
   const t0 = performance.now();
@@ -222,7 +222,7 @@ async function exposureMap(msg) {
     }
     const perCell = Number.isFinite(s.declination) && Number.isFinite(s.minutesUTC);
     if (sunIsUp(s) || perCell) {
-      renderShadows(H, grid, s, cellMeters, rowScale, depth);
+      renderShadows(H, grid, s, cellMeters, rowScale, depth, T);
       for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += msg.stepMinutes;
     }
     k++;
@@ -266,10 +266,10 @@ function render(msg) {
     postMessage({ type: 'frame-skipped', requestId: msg.requestId });
     return;
   }
-  const { grid, H, depth, cellMeters, rowScale } = current;
+  const { grid, H, T, depth, cellMeters, rowScale } = current;
   const { w, h } = grid;
   const t0 = performance.now();
-  renderShadows(H, grid, sunFromMsg(msg), cellMeters, rowScale, depth);
+  renderShadows(H, grid, sunFromMsg(msg), cellMeters, rowScale, depth, T);
   current.depthValid = true;
   const rgba = depthToRGBA(depth, w, h, takeBuffer(w * h * 4), style);
   postMessage(

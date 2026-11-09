@@ -272,8 +272,9 @@ export function rasterizeBuildings(H, T, grid, buildings) {
  * @param {number} altitude élévation du soleil en degrés
  * @param {number} cellMeters taille d'une cellule en mètres
  * @param {Float32Array} depth sortie (w*h)
+ * @param {Float32Array} [T] relief seul (w*h) : s'il est fourni, le relief est lu au point exact du rayon
  */
-export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowScale = null) {
+export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowScale = null, T = null) {
   if (altitude <= 0) {
     depth.fill(NIGHT);
     return depth;
@@ -294,6 +295,10 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
   // Décalage entier arrondi AVANT l'ajout au point de départ : toutes les lignes partagent exactement le même
   // décalage au pas k (x0 + k·sx arrondi après addition pouvait basculer d'un côté ou de l'autre d'un demi-entier
   // selon x0, et sauter des cellules aux azimuts « à égalité »). Avec un décalage commun, la couverture est totale.
+  // Ce décalage commun écarte toutes les lignes du vrai rayon de la même fraction de cellule au même pas : lire le
+  // relief à la cellule arrondie donnait la même erreur de hauteur à toute une colonne (ou ligne), d'où des stries
+  // d'ombre sur les pentes rasantes. Le relief est donc interpolé au point exact du rayon ; les bâtiments restent nets.
+  const xMajor = Math.abs(dx) >= Math.abs(dy);
   const line = (x0, y0) => {
     let top = -Infinity;
     for (let k = 0; ; k++) {
@@ -301,7 +306,30 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
       const iy = y0 + Math.round(k * sy);
       if (ix < 0 || ix >= w || iy < 0 || iy >= h) break;
       const i = iy * w + ix;
-      const z = H[i];
+      let z = H[i];
+      if (T) {
+        let a;
+        let b;
+        let f;
+        if (xMajor) {
+          const p = y0 + k * sy;
+          let j0 = Math.floor(p);
+          f = p - j0;
+          if (j0 < 0) { j0 = 0; f = 0; }
+          const j1 = j0 + 1 < h ? j0 + 1 : j0;
+          a = T[j0 * w + ix];
+          b = T[j1 * w + ix];
+        } else {
+          const p = x0 + k * sx;
+          let j0 = Math.floor(p);
+          f = p - j0;
+          if (j0 < 0) { j0 = 0; f = 0; }
+          const j1 = j0 + 1 < w ? j0 + 1 : j0;
+          a = T[iy * w + j0];
+          b = T[iy * w + j1];
+        }
+        z += a + (b - a) * f - T[i];
+      }
       if (z < top) {
         const d = top - z;
         if (d > depth[i]) depth[i] = d;
@@ -312,7 +340,7 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
     }
   };
 
-  if (Math.abs(dx) >= Math.abs(dy)) {
+  if (xMajor) {
     const x0 = sx > 0 ? 0 : w - 1;
     for (let y = 0; y < h; y++) line(x0, y);
     if (sy > 0) for (let x = 0; x < w; x++) line(x, 0);
@@ -533,11 +561,11 @@ export function sunIsUp(sun) {
  * affleure l'horizon) puis masque jour/nuit cellule par cellule quand les paramètres solaires sont fournis.
  * Les deux étapes partagent la même définition du soleil levé, pour éviter tout éclair au lever/coucher.
  */
-export function renderShadows(H, grid, sun, cellMeters, rowScale, depth) {
+export function renderShadows(H, grid, sun, cellMeters, rowScale, depth, T = null) {
   const { w, h } = grid;
   const up = sunIsUp(sun);
   const altitude = up ? Math.max(sun.altitude, 0.05) : Math.min(sun.altitude, 0);
-  sweepShadows(H, w, h, sun.azimuth, altitude, cellMeters, depth, rowScale);
+  sweepShadows(H, w, h, sun.azimuth, altitude, cellMeters, depth, rowScale, T);
   if (Number.isFinite(sun.declination) && Number.isFinite(sun.minutesUTC)) applyNightMask(depth, grid, sun, up);
   return depth;
 }
