@@ -137,7 +137,16 @@ await scenario('Paris : ombres de bâtiments, nuit, midi, ensoleillement d\'un p
   assert.ok(/#48\.8\d+\/2\.3\d+\/15\.5\?d=2026-11-09&t=15:30/.test(url), url);
   assert.ok(/p=48\./.test(url), `point dans l'URL : ${url}`);
 
-  // Bascule bâtiments 3D / ombres.
+  // Bascule bâtiments 3D : propriété de peinture, aucun nouveau calcul de relief ne doit être déclenché.
+  const hfBefore = await page.evaluate(() => window.__ombres.shadowMap.hfId);
+  await page.click('label:has(#toggle-buildings)');
+  await page.waitForTimeout(1500);
+  const hfAfter = await page.evaluate(() => window.__ombres.shadowMap.hfId);
+  assert.equal(hfAfter, hfBefore, `relief recalculé après la bascule 3D (${hfBefore} → ${hfAfter})`);
+  const op = await page.evaluate(() => window.__ombres.shadowMap.map.getPaintProperty('ombres-buildings-3d', 'fill-extrusion-opacity'));
+  assert.equal(op, 0);
+  await page.click('label:has(#toggle-buildings)');
+  // Bascule ombres.
   await page.click('label:has(#toggle-shadows)');
   const vis = await page.evaluate(() => window.__ombres.shadowMap.map.getLayoutProperty('ombres-overlay', 'visibility'));
   assert.equal(vis, 'none');
@@ -299,7 +308,8 @@ await scenario('Styles OpenFreeMap réels (bright puis liberty) : source, couche
   let info = await page.evaluate(() => {
     const sm = window.__ombres.shadowMap;
     const layers = sm.map.getStyle().layers.map((l) => l.id);
-    const firstSymbol = sm.map.getStyle().layers.findIndex((l) => l.type === 'symbol');
+    const firstSymbol = sm.map.getStyle().layers.findIndex((l) => l.type === 'symbol' && l.layout && l.layout['text-field'] !== undefined);
+    const lastFill = sm.map.getStyle().layers.map((l, i) => (['fill', 'line', 'raster', 'background', 'hillshade'].includes(l.type) && !/^ombres-/.test(l.id) ? i : -1)).filter((i) => i >= 0).pop();
     const labels = sm.map.getLayer('ombres-sunpath-labels');
     return {
       vectorSource: sm.vectorSource,
@@ -308,13 +318,15 @@ await scenario('Styles OpenFreeMap réels (bright puis liberty) : source, couche
       b3dIdx: layers.indexOf('ombres-buildings-3d'),
       hillIdx: layers.indexOf('ombres-hillshade'),
       firstSymbol,
+      lastFill,
+      sunpathFeatures: sm.map.querySourceFeatures('ombres-sunpath').length,
       labelFont: labels ? sm.map.getLayoutProperty('ombres-sunpath-labels', 'text-font') : null,
       b3dSourceLayer: sm.map.getLayer('ombres-buildings-3d') && sm.map.getLayer('ombres-buildings-3d').sourceLayer,
     };
   });
   assert.equal(info.vectorSource, 'openmaptiles', JSON.stringify(info));
   assert.ok(info.nbLayers > 100, `couches du style bright : ${info.nbLayers}`);
-  assert.ok(info.overlayIdx > 0 && info.overlayIdx < info.firstSymbol, `overlay sous les étiquettes : ${JSON.stringify(info)}`);
+  assert.ok(info.overlayIdx > info.lastFill && info.overlayIdx < info.firstSymbol, `overlay au-dessus des remplissages et sous les étiquettes : ${JSON.stringify(info)}`);
   assert.ok(info.hillIdx < info.overlayIdx && info.overlayIdx < info.b3dIdx, `ordre ombrage < ombres < bâtiments 3D : ${JSON.stringify(info)}`);
   assert.ok(Array.isArray(info.labelFont) && info.labelFont.every((f) => typeof f === 'string') && /Noto Sans/.test(info.labelFont[0]), `police ${JSON.stringify(info.labelFont)}`);
   assert.equal(info.b3dSourceLayer, 'building');
@@ -332,12 +344,16 @@ await scenario('Styles OpenFreeMap réels (bright puis liberty) : source, couche
     const m = window.__ombres.shadowMap.map;
     return {
       styleB3d: m.getLayer('building-3d') ? m.getLayoutProperty('building-3d', 'visibility') : 'absent',
-      ours: m.getLayer('ombres-buildings-3d') ? m.getLayoutProperty('ombres-buildings-3d', 'visibility') : 'absent',
+      ours: m.getLayer('ombres-buildings-3d') ? m.getPaintProperty('ombres-buildings-3d', 'fill-extrusion-opacity') : 'absent',
       buildings: window.__ombres.stats.buildings,
+      sunpathFeatures: m.querySourceFeatures('ombres-sunpath').length,
+      coords: m.getSource('ombres').coordinates,
     };
   });
   assert.equal(info.styleB3d, 'none', `building-3d du style masqué : ${JSON.stringify(info)}`);
-  assert.equal(info.ours, 'visible');
+  assert.equal(info.ours, 0.9);
+  assert.ok(info.sunpathFeatures > 5, `course du soleil retracée après changement de fond : ${info.sunpathFeatures}`);
+  assert.ok(Math.abs(info.coords[1][0] - info.coords[0][0]) > 0.01, `grille conservée après changement de fond : ${JSON.stringify(info.coords)}`);
   assert.ok(info.buildings > 100, `bâtiments via liberty : ${info.buildings}`);
   const cov2 = await overlayCoverage(page);
   assert.ok(cov2.ratio > 0.03, `ombres avec liberty : ${JSON.stringify(cov2)}`);

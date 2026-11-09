@@ -165,7 +165,9 @@ export class ShadowMap {
     const style = map.getStyle();
     const layers = style.layers || [];
     this.vectorSource = this._findVectorSource(style);
-    const firstSymbol = (layers.find((l) => l.type === 'symbol') || {}).id;
+    // On insère nos couches sous les étiquettes : première couche « symbol » portant du texte (les symboles
+    // sans texte, comme les flèches de sens unique, peuvent précéder des remplissages dans certains styles).
+    const firstSymbol = (layers.find((l) => l.type === 'symbol' && l.layout && l.layout['text-field'] !== undefined) || {}).id;
 
     if (!map.getSource('dem')) {
       map.addSource('dem', {
@@ -177,12 +179,16 @@ export class ShadowMap {
         attribution: DEM_ATTRIBUTION,
       });
     }
+    if (!map.getSource('dem-hillshade')) {
+      // Source distincte pour l'ombrage : MapLibre dégrade la résolution d'un hillshade qui partage la source du relief 3D.
+      map.addSource('dem-hillshade', { type: 'raster-dem', tiles: [DEM_URL], tileSize: 256, maxzoom: 15, encoding: 'terrarium' });
+    }
     if (!map.getLayer('ombres-hillshade')) {
       map.addLayer(
         {
           id: 'ombres-hillshade',
           type: 'hillshade',
-          source: 'dem',
+          source: 'dem-hillshade',
           layout: { visibility: this.options.terrain ? 'visible' : 'none' },
           paint: {
             'hillshade-exaggeration': 0.3,
@@ -230,12 +236,12 @@ export class ShadowMap {
           'source-layer': 'building',
           minzoom: 13,
           filter: ['!=', ['get', 'hide_3d'], true],
-          layout: { visibility: this.options.buildings3d ? 'visible' : 'none' },
           paint: {
             'fill-extrusion-color': this.options.style === 'satellite' ? '#c9c4bb' : '#e4dfd6',
             'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 6],
             'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
-            'fill-extrusion-opacity': 0.9,
+            // Bascule par l'opacité (propriété de peinture) : changer la visibilité rechargerait toutes les tuiles vectorielles.
+            'fill-extrusion-opacity': this.options.buildings3d ? 0.9 : 0,
           },
         },
         firstSymbol,
@@ -598,7 +604,7 @@ export class ShadowMap {
   setBuildings3d(v) {
     this.options.buildings3d = v;
     if (this.map.getLayer('ombres-buildings-3d')) {
-      this.map.setLayoutProperty('ombres-buildings-3d', 'visibility', v ? 'visible' : 'none');
+      this.map.setPaintProperty('ombres-buildings-3d', 'fill-extrusion-opacity', v ? 0.9 : 0);
     }
   }
 
@@ -612,7 +618,8 @@ export class ShadowMap {
   setStyle(key) {
     if (!STYLES[key] || key === this.options.style) return;
     this.options.style = key;
-    this.currentGridId = null;
+    // currentGridId est conservé : la source canvas est recréée avec les coordonnées de la grille courante,
+    // l'image précédente reste donc correctement calée jusqu'à la prochaine image.
     this.map.setStyle(STYLES[key].style(), { diff: false });
   }
 

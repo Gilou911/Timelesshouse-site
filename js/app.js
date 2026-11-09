@@ -378,6 +378,8 @@ shadowMap.on('maperror', (err) => {
   setStatus(`Fond de carte indisponible : ${msg.slice(0, 90)}`, true);
 });
 shadowMap.on('ready', () => refreshAll());
+// Un changement de fond recrée les sources : on retrace la course du soleil et on renvoie la position du soleil.
+shadowMap.on('styleload', () => refreshSun());
 
 function setStatus(text, isError = false) {
   ui.status.textContent = text;
