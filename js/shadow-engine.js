@@ -246,13 +246,13 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
   // d'échelle de la projection Mercator avec la latitude sur les vues très étendues.
   const drop = Math.tan(altitude * RAD) * stepMeters;
 
+  // Position calculée par multiplication (x0 + k·sx) et non par accumulation : toutes les lignes partagent
+  // exactement le même décalage fractionnaire à la colonne k, donc l'arrondi est cohérent et aucune cellule n'est sautée.
   const line = (x0, y0) => {
-    let px = x0;
-    let py = y0;
     let top = -Infinity;
-    for (;;) {
-      const ix = Math.round(px);
-      const iy = Math.round(py);
+    for (let k = 0; ; k++) {
+      const ix = Math.round(x0 + k * sx);
+      const iy = Math.round(y0 + k * sy);
       if (ix < 0 || ix >= w || iy < 0 || iy >= h) break;
       const i = iy * w + ix;
       const z = H[i];
@@ -263,8 +263,6 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
         top = z;
       }
       top -= rowScale ? drop * rowScale[iy] : drop;
-      px += sx;
-      py += sy;
     }
   };
 
@@ -371,13 +369,15 @@ export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 
  * samples = [{ azimuth, altitude }], chaque échantillon vaut `stepMinutes`.
  * `onProgress(k, n)` est appelé après chaque balayage (facultatif).
  */
-export function accumulateExposure(H, w, h, samples, stepMinutes, cellMeters, rowScale, depth, acc, onProgress) {
+export function accumulateExposure(H, w, h, samples, stepMinutes, cellMeters, rowScale, depth, acc, onProgress, grid) {
   acc.fill(0);
   const n = w * h;
   for (let k = 0; k < samples.length; k++) {
     const s = samples[k];
-    if (s.altitude > 0) {
+    const perCell = grid && Number.isFinite(s.declination) && Number.isFinite(s.minutesUTC);
+    if (s.altitude > 0 || perCell) {
       sweepShadows(H, w, h, s.azimuth, s.altitude, cellMeters, depth, rowScale);
+      if (perCell) applyNightMask(depth, grid, s, s.altitude > 0);
       for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += stepMinutes;
     }
     if (onProgress) onProgress(k + 1, samples.length);
@@ -432,4 +432,36 @@ export function exposureToRGBA(acc, w, h, out, maxMinutes, alpha) {
     rgba[j + 3] = alpha;
   }
   return rgba;
+}
+
+const SIN_HORIZON = Math.sin(-0.833 * RAD); // bord supérieur du disque solaire à l'horizon
+
+/**
+ * Masque jour/nuit cellule par cellule : la position du soleil varie avec la longitude (angle horaire)
+ * et la latitude. Indispensable dès que la vue couvre plus de quelques degrés (terminateur).
+ * sun = { declination (deg), eqTime (min), minutesUTC } ; `centerLit` indique si le balayage a été fait.
+ * Les cellules sous l'horizon reçoivent NIGHT ; si le centre était de nuit mais la cellule de jour, elle est éclairée.
+ */
+export function applyNightMask(depth, grid, sun, centerLit) {
+  const { w, h, originX, originY, cellUnits } = grid;
+  const sinD = Math.sin(sun.declination * RAD);
+  const cosD = Math.cos(sun.declination * RAD);
+  const cosHA = new Float64Array(w);
+  for (let x = 0; x < w; x++) {
+    const lng = (originX + (x + 0.5) * cellUnits) * 360 - 180;
+    const ha = ((sun.minutesUTC + sun.eqTime + 4 * lng) / 4 - 180) * RAD;
+    cosHA[x] = Math.cos(ha);
+  }
+  for (let y = 0; y < h; y++) {
+    const lat = mercatorToLngLat(0, originY + (y + 0.5) * cellUnits)[1] * RAD;
+    const a = Math.sin(lat) * sinD;
+    const b = Math.cos(lat) * cosD;
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      const sinAlt = a + b * cosHA[x];
+      if (sinAlt <= SIN_HORIZON) depth[row + x] = NIGHT;
+      else if (!centerLit) depth[row + x] = 0;
+    }
+  }
+  return depth;
 }

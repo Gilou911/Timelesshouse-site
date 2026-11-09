@@ -2,7 +2,7 @@
 // (relief + bâtiments) et calcule les ombres à la demande.
 import {
   DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, sweepShadows, depthToRGBA, pointExposure, rowScaleFactors,
-  accumulateExposure, exposureToRGBA,
+  accumulateExposure, exposureToRGBA, applyNightMask,
 } from './shadow-engine.js';
 
 const TILE_SIZE = 256;
@@ -156,8 +156,10 @@ async function exposureMap(msg) {
       postMessage({ type: 'frame-skipped', requestId: msg.requestId });
       return;
     }
-    if (s.altitude > 0) {
+    const perCell = Number.isFinite(s.declination) && Number.isFinite(s.minutesUTC);
+    if (s.altitude > 0 || perCell) {
       sweepShadows(H, w, h, s.azimuth, s.altitude, cellMeters, depth, rowScale);
+      if (perCell) applyNightMask(depth, grid, s, s.altitude > 0);
       for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += msg.stepMinutes;
     }
     k++;
@@ -177,8 +179,12 @@ async function exposureMap(msg) {
   );
 }
 
+function sunFromMsg(msg) {
+  return { azimuth: msg.azimuth, altitude: msg.altitude, declination: msg.declination, eqTime: msg.eqTime, minutesUTC: msg.minutesUTC };
+}
+
 function render(msg) {
-  lastSun = { azimuth: msg.azimuth, altitude: msg.altitude };
+  lastSun = sunFromMsg(msg);
   if (!current) {
     // Pas encore de champ de hauteurs : on répond quand même pour libérer le verrou côté page.
     postMessage({ type: 'frame-skipped', requestId: msg.requestId });
@@ -188,6 +194,9 @@ function render(msg) {
   const { w, h } = grid;
   const t0 = performance.now();
   sweepShadows(H, w, h, msg.azimuth, msg.altitude, cellMeters, depth, rowScale);
+  if (Number.isFinite(msg.declination) && Number.isFinite(msg.minutesUTC)) {
+    applyNightMask(depth, grid, sunFromMsg(msg), msg.altitude > 0);
+  }
   const rgba = depthToRGBA(depth, w, h, null, style);
   postMessage(
     { type: 'frame', id: current.id, requestId: msg.requestId, w, h, buffer: rgba.buffer, ms: performance.now() - t0 },
@@ -239,7 +248,7 @@ self.onmessage = (ev) => {
       break;
     case 'render':
       if (mode === 'exposure') {
-        lastSun = { azimuth: msg.azimuth, altitude: msg.altitude };
+        lastSun = sunFromMsg(msg);
         postMessage({ type: 'frame-skipped', requestId: msg.requestId });
       } else {
         render(msg);

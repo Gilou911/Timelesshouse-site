@@ -112,3 +112,6 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - Le relief a une résolution de 30 m environ (mieux en Europe) : les ombres fines des petits reliefs sont lissées.
 - Les ombres des bâtiments situés juste hors de la zone chargée peuvent manquer en bord de carte.
 - Les arbres ne sont pas pris en compte.
+- À l'échelle d'un pays ou d'un continent, la direction du soleil est celle du centre de la carte ; seule la limite
+  jour/nuit (terminateur) est calculée point par point.
+- Les zones sous le niveau de la mer (mer Morte, polders) sont ramenées à 0 m pour ne pas faire de la côte une falaise.

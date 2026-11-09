@@ -121,6 +121,15 @@ function focusLngLat() {
   return { lng: c.lng, lat: c.lat };
 }
 
+/** Paramètres permettant au worker de recalculer l'élévation du soleil en chaque cellule (terminateur). */
+function sunExtras(t, pos) {
+  return {
+    declination: pos.declination,
+    eqTime: pos.equationOfTime,
+    minutesUTC: t.getUTCHours() * 60 + t.getUTCMinutes() + t.getUTCSeconds() / 60,
+  };
+}
+
 function refreshDay() {
   const c = focusLngLat();
   day = dayInfo(noonUTC(), c.lat, c.lng);
@@ -177,8 +186,9 @@ function requestExposureMap() {
   const step = 20;
   const samples = [];
   for (let m = 0; m < 1440; m += step) {
-    const p = sunPosition(wallToUTC(state.tz, y, mo, d, Math.floor(m / 60), m % 60), center.lat, center.lng);
-    samples.push({ azimuth: p.azimuth, altitude: p.altitude });
+    const t = wallToUTC(state.tz, y, mo, d, Math.floor(m / 60), m % 60);
+    const p = sunPosition(t, center.lat, center.lng);
+    samples.push({ azimuth: p.azimuth, altitude: p.altitude, ...sunExtras(t, p) });
   }
   const maxMinutes = day ? day.dayLengthMinutes : 0;
   shadowMap.requestExposureMap(samples, step, maxMinutes);
@@ -201,7 +211,7 @@ function refreshSun() {
   const center = map.getCenter();
   const t = instant();
   const posCenter = sunPosition(t, center.lat, center.lng);
-  shadowMap.setSun(posCenter.azimuth, posCenter.altitude);
+  shadowMap.setSun(posCenter.azimuth, posCenter.altitude, sunExtras(t, posCenter));
   const pos = state.point ? sunPosition(t, c.lat, c.lng) : posCenter;
   const phase = lightPhase(pos.altitude);
   ui.phase.textContent = phase.label;

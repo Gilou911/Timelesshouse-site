@@ -402,7 +402,7 @@ export class ShadowMap {
     const grid = { w, h, originX: x0, originY: y0, cellUnits };
     const cellMeters = cellUnits * metersPerUnit(center.lat);
     const demZoom = Math.max(0, Math.min(15, Math.floor(Math.log2(1 / (cellUnits * 256)))));
-    const buildings = this._collectBuildings();
+    const buildings = this._collectBuildings(x0, x1);
     const id = ++this.hfId;
     this.grids.set(id, grid);
     for (const k of this.grids.keys()) if (k < id - 2 && k !== this.currentGridId) this.grids.delete(k);
@@ -424,7 +424,7 @@ export class ShadowMap {
   }
 
   /** Extrait les emprises de bâtiments (tuiles vectorielles chargées) en tableaux plats, unités Mercator. */
-  _collectBuildings() {
+  _collectBuildings(gx0 = 0, gx1 = 1) {
     const coords = [];
     const ringStart = [0];
     const polyStart = [0];
@@ -456,7 +456,10 @@ export class ShadowMap {
             for (let i = 0; i < n; i++) {
               const pt = ring[i];
               if (i === n - 1 && pt[0] === ring[0][0] && pt[1] === ring[0][1]) break;
-              const [mx, my] = lngLatToMercator(pt[0], pt[1]);
+              let [mx, my] = lngLatToMercator(pt[0], pt[1]);
+              // Vue à cheval sur l'antiméridien : la grille déborde de [0,1], on y ramène les sommets.
+              if (gx0 < 0 && mx > gx1) mx -= 1;
+              else if (gx1 > 1 && mx < gx0) mx += 1;
               coords.push(mx, my);
             }
             if (coords.length / 2 - start < 3) {
@@ -565,7 +568,7 @@ export class ShadowMap {
       return;
     }
     this.frameInFlight = true;
-    this.worker.postMessage({ type: 'render', requestId: ++this.requestId, azimuth: this.sun.azimuth, altitude: this.sun.altitude });
+    this.worker.postMessage({ type: 'render', requestId: ++this.requestId, ...this.sun });
     // Sécurité : si le worker ne répond pas (pas encore de champ de hauteurs), on ne bloque pas les rendus suivants.
     clearTimeout(this._renderGuard);
     this._renderGuard = setTimeout(() => {
@@ -573,9 +576,12 @@ export class ShadowMap {
     }, 1500);
   }
 
-  /** Met à jour la position du soleil utilisée pour les ombres. */
-  setSun(azimuth, altitude) {
-    this.sun = { azimuth, altitude };
+  /**
+   * Met à jour la position du soleil utilisée pour les ombres.
+   * `extra` = { declination, eqTime, minutesUTC } permet le masque jour/nuit par cellule (vues étendues).
+   */
+  setSun(azimuth, altitude, extra = {}) {
+    this.sun = { azimuth, altitude, ...extra };
     this._requestRender();
   }
 

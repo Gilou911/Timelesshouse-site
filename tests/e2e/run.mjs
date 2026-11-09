@@ -262,6 +262,31 @@ await scenario('Heures de soleil : carte cumulée du jour, légende, URL', async
   await context.close();
 });
 
+await scenario('Extrêmes : monde entier (z1), antiméridien (Fidji), zoom 19 en ville', async () => {
+  const { page, context } = await openPage({ viewport: { width: 1000, height: 700 }, hash: '#20/0/1.2?d=2026-06-21&t=12:00' });
+  let { stats } = await waitForFrame(page, 1);
+  assert.ok(stats.tilesLoaded > 0, `monde : tuiles ${JSON.stringify(stats)}`);
+  const world = await overlayCoverage(page);
+  assert.ok(world.ratio > 0.25 && world.ratio < 0.75, `monde à midi UTC : environ la moitié du globe est dans la nuit (${world.ratio.toFixed(2)})`);
+  await page.screenshot({ path: join(OUT, 'monde.png') });
+  // Antiméridien : Suva (Fidji), 178,4° E, zoom 11.
+  await page.evaluate(() => window.__ombres.shadowMap.map.jumpTo({ center: [178.44, -18.14], zoom: 11 }));
+  let before = await page.evaluate(() => window.__ombres.frames);
+  await page.waitForFunction((n) => window.__ombres.frames > n, before, { timeout: 60000 });
+  stats = await page.evaluate(() => window.__ombres.stats);
+  assert.ok(stats.tilesLoaded > 0 && stats.tilesMissing === 0, `Fidji : ${JSON.stringify(stats)}`);
+  assert.ok(stats.maxH > 200, `relief fidjien présent (max ${stats.maxH} m)`);
+  const tz = await page.textContent('#tz-label');
+  assert.ok(/Pacific\/Fiji/.test(tz), tz);
+  // Zoom 19 à Paris : bâtiments issus des tuiles z14 sur-zoomées.
+  await page.evaluate(() => window.__ombres.shadowMap.map.jumpTo({ center: [2.3522, 48.8566], zoom: 19 }));
+  before = await page.evaluate(() => window.__ombres.frames);
+  await page.waitForFunction((n) => window.__ombres.frames > n, before, { timeout: 60000 });
+  stats = await page.evaluate(() => window.__ombres.stats);
+  assert.ok(stats.buildings > 0, `bâtiments à z19 : ${stats.buildings}`);
+  await context.close();
+});
+
 await scenario('Lecture (animation) et clavier', async () => {
   const { page, context } = await openPage({ viewport: { width: 1000, height: 700 }, hash: '#48.8566/2.3522/15?d=2026-03-20&t=10:00' });
   await waitForFrame(page, 1);

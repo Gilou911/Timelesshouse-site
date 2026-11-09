@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sweepShadows, rasterizeBuildings, decodeTerrarium, DemMosaic, fillTerrain, depthToRGBA, pointExposure,
-  lngLatToMercator, mercatorToLngLat, metersPerUnit, rowScaleFactors, accumulateExposure, exposureToRGBA, exposureColor, NIGHT,
+  lngLatToMercator, mercatorToLngLat, metersPerUnit, rowScaleFactors, accumulateExposure, exposureToRGBA, exposureColor, applyNightMask, NIGHT,
 } from '../../js/shadow-engine.js';
 
 function grid(w, h) {
@@ -212,4 +212,46 @@ test('accumulateExposure : le nord d\'un mur reçoit moins de soleil que le sud'
   assert.equal(rgba[(25 * w + 15) * 4 + 3], 200);
   const cSouth = exposureColor(1);
   assert.deepEqual([rgba[(25 * w + 15) * 4], rgba[(25 * w + 15) * 4 + 1], rgba[(25 * w + 15) * 4 + 2]], cSouth);
+});
+
+test('applyNightMask : à 12:00 UTC le méridien de Greenwich est de jour, l\'antiméridien de nuit', () => {
+  // Grille couvrant le monde (latitudes ±60°), 36 x 12 cellules.
+  const [, yTop] = lngLatToMercator(0, 60);
+  const [, yBottom] = lngLatToMercator(0, -60);
+  const w = 36;
+  const h = 12;
+  const grid = { w, h, originX: 0, originY: yTop, cellUnits: 1 / w };
+  assert.ok(Math.abs((yBottom - yTop) / h - 1 / w) < 0.01, 'cellules à peu près carrées');
+  const depth = new Float32Array(w * h);
+  // Équinoxe : déclinaison ≈ 0, équation du temps ≈ −7 min ; centre (lng 0) de jour.
+  applyNightMask(depth, grid, { declination: 0, eqTime: -7, minutesUTC: 720 }, true);
+  const at = (lng, lat) => {
+    const [mx, my] = lngLatToMercator(lng, lat);
+    return depth[Math.floor((my - yTop) / grid.cellUnits) * w + Math.floor(mx / grid.cellUnits)];
+  };
+  assert.equal(at(0, 45), 0, 'Europe de jour');
+  assert.equal(at(-75, 40), 0, 'New York de jour (matin)');
+  assert.equal(at(180, 0), NIGHT, 'antiméridien de nuit');
+  assert.equal(at(140, -30), NIGHT, 'Australie de nuit');
+  // Centre de nuit (soleil couché au centre) : les cellules de jour sont rétablies à 0.
+  depth.fill(NIGHT);
+  applyNightMask(depth, grid, { declination: 0, eqTime: -7, minutesUTC: 0 }, false);
+  assert.equal(at(180, 0), 0, 'antiméridien de jour à minuit UTC');
+  assert.equal(at(0, 45), NIGHT, 'Europe de nuit à minuit UTC');
+});
+
+test('balayage : chaque cellule est visitée pour tout azimut (plateau uniforme sous une dalle surélevée)', () => {
+  // Dalle de 100 m couvrant tout le bord « côté soleil » : toute cellule non couverte par une ligne resterait éclairée.
+  const w = 50;
+  const h = 37;
+  for (let az = 0; az < 360; az += 7.5) {
+    const H = new Float32Array(w * h);
+    const depth = new Float32Array(w * h);
+    // Un mur très haut tout autour du bord : toute cellule intérieure doit être à l'ombre pour un soleil bas.
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (x === 0 || y === 0 || x === w - 1 || y === h - 1) H[y * w + x] = 1000;
+    sweepShadows(H, w, h, az, 5, 1, depth);
+    let missed = 0;
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) if (depth[y * w + x] === 0) missed++;
+    assert.equal(missed, 0, `azimut ${az} : ${missed} cellules intérieures non visitées`);
+  }
 });
