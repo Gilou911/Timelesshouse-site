@@ -55,6 +55,8 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.45);
   }
 }
+/* 36 px seulement avec souris ou trackpad, sans aucun écran tactile (guide HIG § 22 : 28 px minimum à la souris).
+   Dès qu'un pointeur tactile existe, même sur grand écran (iPad, PC hybride), la règle suivante remet 44 px. */
 @media (min-width: 761px) { :root { --hit: 36px; } }
 @media (any-pointer: coarse) { :root { --hit: 44px; } }
 /* Sans flou possible, ou transparence réduite, ou contraste accru : des surfaces pleines. */
