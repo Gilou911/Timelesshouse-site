@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { startServer } from './server.mjs';
+import { decodePNG } from '../../js/png.js';
 
 // Playwright et Chromium sont pré-installés globalement dans l'environnement de test (NODE_PATH).
 const require = createRequire(import.meta.url);
@@ -27,7 +28,7 @@ const browser = await chromium.launch({
 const failures = [];
 const consoleErrors = [];
 
-async function openPage({ viewport, hash, mobile = false, planStyle, satelliteStyle }) {
+async function openPage({ viewport, hash, mobile = false, planStyle, satelliteStyle, config = {}, setup }) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, isMobile: mobile, hasTouch: mobile, locale: 'fr-FR', timezoneId: 'Europe/Paris' });
   const page = await context.newPage();
   page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
@@ -35,16 +36,18 @@ async function openPage({ viewport, hash, mobile = false, planStyle, satelliteSt
     if (msg.type() === 'error' && !/glyph|font|favicon/i.test(msg.text())) consoleErrors.push(`console: ${msg.text()}`);
   });
   await page.addInitScript(
-    ({ b, planStyle, satelliteStyle }) => {
+    ({ b, planStyle, satelliteStyle, config }) => {
       window.OMBRES_CONFIG = {
         demUrl: `${b}/dem/{z}/{x}/{y}.png`,
         planStyle: planStyle || `${b}/mock/style.json`,
         satelliteStyle: satelliteStyle || `${b}/mock/style.json`,
         openFreeMap: b,
+        ...config,
       };
     },
-    { b: base, planStyle, satelliteStyle },
+    { b: base, planStyle, satelliteStyle, config },
   );
+  if (setup) await setup(page);
   await page.goto(`${base}/${hash}`, { waitUntil: 'load' });
   return { page, context };
 }
@@ -226,6 +229,42 @@ await scenario('Mobile : panneau replié, barre de temps visible, recherche par 
   assert.ok(collapsed, 'panneau replié sur mobile');
   assert.ok(await page.isVisible('#time'), 'curseur visible');
   await page.screenshot({ path: join(OUT, 'mobile.png') });
+  // Tout tient dans l'écran, sans chevauchement, et les champs ne déclenchent pas le zoom automatique d'iOS (≥ 16 px).
+  const layout = () => page.evaluate(() => {
+    const box = (id) => {
+      const r = document.getElementById(id).getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    };
+    const font = (id) => parseFloat(getComputedStyle(document.getElementById(id)).fontSize);
+    const ctrl = document.querySelector('#map .maplibregl-ctrl-top-right').getBoundingClientRect();
+    return {
+      vw: document.documentElement.clientWidth,
+      scrollW: document.documentElement.scrollWidth,
+      boxes: { 'panel-toggle': box('panel-toggle'), locate: box('locate'), 'search-input': box('search-input'), play: box('play'), date: box('date'), 'time-label': box('time-label'), now: box('now') },
+      topbarBottom: document.querySelector('.topbar').getBoundingClientRect().bottom,
+      brandTop: document.querySelector('.topbar').firstElementChild.getBoundingClientRect().top,
+      ctrlTop: ctrl.top,
+      fonts: { search: font('search-input'), date: font('date') },
+    };
+  });
+  const lay = await layout();
+  assert.ok(lay.scrollW <= lay.vw, `pas de défilement horizontal : ${lay.scrollW} > ${lay.vw}`);
+  for (const [id, b] of Object.entries(lay.boxes)) {
+    assert.ok(b.left >= 0 && b.right <= lay.vw && b.right > b.left, `#${id} dans l'écran : ${JSON.stringify(b)} (largeur ${lay.vw})`);
+  }
+  const order = ['play', 'date', 'time-label', 'now'];
+  for (let i = 1; i < order.length; i++) {
+    assert.ok(lay.boxes[order[i - 1]].right <= lay.boxes[order[i]].left + 0.5, `#${order[i - 1]} ne chevauche pas #${order[i]} : ${JSON.stringify(lay.boxes)}`);
+  }
+  assert.ok(lay.boxes['search-input'].right - lay.boxes['search-input'].left >= 80, `champ de recherche utilisable : ${JSON.stringify(lay.boxes['search-input'])}`);
+  assert.ok(lay.fonts.search >= 16 && lay.fonts.date >= 16, `champs à 16 px au moins sur écran tactile : ${JSON.stringify(lay.fonts)}`);
+  // Encoche (application installée sur l'écran d'accueil) : la barre du haut et les boutons de la carte descendent d'autant.
+  await page.evaluate(() => document.documentElement.style.setProperty('--safe-top', '47px'));
+  const notch = await layout();
+  assert.ok(Math.abs(notch.topbarBottom - lay.topbarBottom - 47) < 1, `barre du haut décalée de 47 px : ${lay.topbarBottom} → ${notch.topbarBottom}`);
+  assert.ok(Math.abs(notch.brandTop - lay.brandTop - 47) < 1, `contenu de la barre sous l'encoche : ${lay.brandTop} → ${notch.brandTop}`);
+  assert.ok(Math.abs(notch.ctrlTop - lay.ctrlTop - 47) < 1, `boutons de la carte décalés : ${lay.ctrlTop} → ${notch.ctrlTop}`);
+  await page.evaluate(() => document.documentElement.style.removeProperty('--safe-top'));
   await page.click('#panel-toggle');
   await page.waitForTimeout(400);
   const open = await page.evaluate(() => !document.getElementById('panel').classList.contains('collapsed'));
@@ -301,19 +340,55 @@ await scenario('Extrêmes : monde entier (z1), antiméridien (Fidji), zoom 19 en
   const world = await overlayCoverage(page);
   assert.ok(world.ratio > 0.25 && world.ratio < 0.75, `monde à midi UTC : environ la moitié du globe est dans la nuit (${world.ratio.toFixed(2)})`);
   await page.screenshot({ path: join(OUT, 'monde.png') });
+  // Vue plus large que le monde (z0,5 : 724 px par monde, écran de 1000 px). La grille tient en une largeur de monde,
+  // sinon ses copies se superposent et la nuit s'assombrit plusieurs fois dès que le relief 3D est actif.
+  const hfBefore = await page.evaluate(() => window.__ombres.shadowMap.hfId);
+  await page.evaluate(() => window.__ombres.shadowMap.map.jumpTo({ center: [0, 20], zoom: 0.5 }));
+  await page.waitForFunction((n) => window.__ombres.shadowMap.currentGridId > n, hfBefore, { timeout: 60000 });
+  const wide = await page.evaluate(() => {
+    const sm = window.__ombres.shadowMap;
+    const g = sm.grids.get(sm.currentGridId);
+    const b = sm.map.getBounds();
+    return { span: g.w * g.cellUnits, originX: g.originX, lngSpan: b.getEast() - b.getWest() };
+  });
+  assert.ok(wide.lngSpan > 360, `la vue dépasse bien un monde (${wide.lngSpan.toFixed(0)}°)`);
+  assert.ok(Math.abs(wide.span - 1) < 1e-9, `grille d'une largeur de monde exactement : ${wide.span}`);
+  assert.ok(Math.abs(wide.originX) < 1e-9, `grille centrée sur la vue : origine ${wide.originX}`);
+  // Nuit à 180° de longitude : les deux copies visibles sont à 362 px de part et d'autre du centre.
+  const nightLum = async () => {
+    await page.waitForTimeout(600);
+    const img = await decodePNG(new Uint8Array(await page.screenshot()));
+    return [[862, 330], [862, 420], [845, 250]].map(([x, y]) => {
+      const i = (y * img.width + x) * 4;
+      return Math.round((img.rgba[i] + img.rgba[i + 1] + img.rgba[i + 2]) / 3);
+    });
+  };
+  const flat = await nightLum();
+  assert.ok(flat.every((l) => l > 50 && l < 140), `nuit translucide sur le plan : ${flat}`);
+  await page.click('label:has(#toggle-terrain)');
+  await page.waitForFunction(() => !!window.__ombres.shadowMap.map.getTerrain(), null, { timeout: 20000 });
+  await page.waitForFunction(() => window.__ombres.shadowMap.map.areTilesLoaded(), null, { timeout: 30000 });
+  const relief = await nightLum();
+  assert.ok(
+    relief.every((l, i) => l > flat[i] - 30),
+    `relief 3D : la nuit garde la même intensité, sans copies superposées (plan ${flat}, relief ${relief})`,
+  );
+  await page.screenshot({ path: join(OUT, 'monde-relief-3d.png') });
+  await page.click('label:has(#toggle-terrain)');
+  await page.waitForFunction(() => !window.__ombres.shadowMap.map.getTerrain(), null, { timeout: 20000 });
   // Antiméridien : Suva (Fidji), 178,4° E, zoom 11.
+  let hf = await page.evaluate(() => window.__ombres.shadowMap.hfId);
   await page.evaluate(() => window.__ombres.shadowMap.map.jumpTo({ center: [178.44, -18.14], zoom: 11 }));
-  let before = await page.evaluate(() => window.__ombres.frames);
-  await page.waitForFunction((n) => window.__ombres.frames > n, before, { timeout: 60000 });
+  await page.waitForFunction((n) => window.__ombres.shadowMap.currentGridId > n, hf, { timeout: 60000 });
   stats = await page.evaluate(() => window.__ombres.stats);
   assert.ok(stats.tilesLoaded > 0 && stats.tilesMissing === 0, `Fidji : ${JSON.stringify(stats)}`);
   assert.ok(stats.maxH > 200, `relief fidjien présent (max ${stats.maxH} m)`);
   const tz = await page.textContent('#tz-label');
   assert.ok(/Pacific\/Fiji/.test(tz), tz);
   // Zoom 19 à Paris : bâtiments issus des tuiles z14 sur-zoomées.
+  hf = await page.evaluate(() => window.__ombres.shadowMap.hfId);
   await page.evaluate(() => window.__ombres.shadowMap.map.jumpTo({ center: [2.3522, 48.8566], zoom: 19 }));
-  before = await page.evaluate(() => window.__ombres.frames);
-  await page.waitForFunction((n) => window.__ombres.frames > n, before, { timeout: 60000 });
+  await page.waitForFunction((n) => window.__ombres.shadowMap.currentGridId > n, hf, { timeout: 60000 });
   stats = await page.evaluate(() => window.__ombres.stats);
   assert.ok(stats.buildings > 0, `bâtiments à z19 : ${stats.buildings}`);
   await context.close();
@@ -351,7 +426,7 @@ await scenario('Styles OpenFreeMap réels (bright puis liberty) : source, couche
   assert.ok(info.nbLayers > 100, `couches du style bright : ${info.nbLayers}`);
   assert.ok(info.overlayIdx > info.lastFill && info.overlayIdx < info.firstSymbol, `overlay au-dessus des remplissages et sous les étiquettes : ${JSON.stringify(info)}`);
   assert.ok(info.hillIdx < info.overlayIdx && info.overlayIdx < info.b3dIdx, `ordre ombrage < ombres < bâtiments 3D : ${JSON.stringify(info)}`);
-  assert.ok(Array.isArray(info.labelFont) && info.labelFont.every((f) => typeof f === 'string') && /Noto Sans/.test(info.labelFont[0]), `police ${JSON.stringify(info.labelFont)}`);
+  assert.ok(Array.isArray(info.labelFont) && info.labelFont.every((f) => typeof f === 'string') && /Noto Sans/.test(info.labelFont[0]) && !info.labelFont.some((f) => /italic|oblique/i.test(f)), `police droite du style : ${JSON.stringify(info.labelFont)}`);
   assert.equal(info.b3dSourceLayer, 'building');
   await page.waitForTimeout(400);
   const cov = await overlayCoverage(page);
@@ -381,6 +456,50 @@ await scenario('Styles OpenFreeMap réels (bright puis liberty) : source, couche
   const cov2 = await overlayCoverage(page);
   assert.ok(cov2.ratio > 0.03, `ombres avec liberty : ${JSON.stringify(cov2)}`);
   await page.screenshot({ path: join(OUT, 'ofm-liberty.png') });
+  await context.close();
+});
+
+await scenario('Tuile muette : calcul sans attendre le repos de la carte, tuiles tardives prises en compte', async () => {
+  // Une tuile de fond ne répond jamais (la carte n'atteint donc jamais « idle ») et une colonne de tuiles de bâtiments arrive en retard.
+  const held = [];
+  let release = false;
+  let stalled = 0;
+  const { page, context } = await openPage({
+    viewport: { width: 1280, height: 800 },
+    hash: '#48.8566/2.3522/15.5?d=2026-11-09&t=15:30',
+    config: { idleFallbackMs: 1500 },
+    setup: async (page) => {
+      await page.route('**/mock/raster/**', (route) => {
+        if (stalled++ === 0) return undefined; // jamais de réponse
+        return route.continue();
+      });
+      await page.route('**/mock/vec/14/8298/*.pbf', (route) => {
+        if (release) return route.continue();
+        held.push(route);
+        return undefined;
+      });
+    },
+  });
+  const first = await waitForFrame(page, 1, 20000);
+  assert.ok(stalled > 0, 'une tuile de fond a bien été retenue');
+  assert.ok(held.length > 0, 'des tuiles de bâtiments ont bien été retenues');
+  const state1 = await page.evaluate(() => ({ loaded: window.__ombres.shadowMap.map.areTilesLoaded(), hfId: window.__ombres.shadowMap.hfId }));
+  assert.equal(state1.loaded, false, 'la carte n\'est pas au repos quand la première image arrive');
+  assert.ok(first.stats.buildings > 0, `bâtiments déjà chargés pris en compte : ${first.stats.buildings}`);
+  await page.waitForTimeout(400);
+  const cov1 = await overlayCoverage(page);
+  assert.ok(cov1.ratio > 0.02, `ombres affichées malgré la tuile muette : ${JSON.stringify(cov1)}`);
+  // Les tuiles en retard arrivent : un nouveau calcul part tout seul, avec davantage de bâtiments.
+  release = true;
+  for (const route of held) await route.continue();
+  await page.waitForFunction((n) => window.__ombres.stats && window.__ombres.stats.buildings > n, first.stats.buildings, { timeout: 20000 });
+  const state2 = await page.evaluate(() => ({ loaded: window.__ombres.shadowMap.map.areTilesLoaded(), hfId: window.__ombres.shadowMap.hfId, buildings: window.__ombres.stats.buildings }));
+  assert.equal(state2.loaded, false, 'la carte est toujours bloquée par la tuile muette');
+  assert.ok(state2.hfId > state1.hfId, `relief recalculé après les tuiles tardives (${state1.hfId} → ${state2.hfId})`);
+  // Un déplacement est lui aussi suivi d'un calcul, sans repos de la carte.
+  const frames = await page.evaluate(() => window.__ombres.frames);
+  await page.evaluate(() => window.__ombres.shadowMap.map.panBy([120, 0], { animate: false }));
+  await page.waitForFunction((v) => window.__ombres.shadowMap.hfId > v.hfId && window.__ombres.frames > v.frames, { hfId: state2.hfId, frames }, { timeout: 20000 });
   await context.close();
 });
 

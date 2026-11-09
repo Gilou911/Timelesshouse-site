@@ -6,6 +6,8 @@ export const DEM_URL = CFG.demUrl || 'https://s3.amazonaws.com/elevation-tiles-p
 export const OFM = CFG.openFreeMap || 'https://tiles.openfreemap.org';
 export const ESRI_URL =
   CFG.esriUrl || 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+// Attente maximale du repos de la carte avant de calculer avec les tuiles déjà chargées.
+const IDLE_FALLBACK_MS = CFG.idleFallbackMs > 0 ? CFG.idleFallbackMs : 6000;
 const DEM_ATTRIBUTION =
   'Relief : <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Terrain Tiles</a> (Mapzen, AWS Open Data)';
 const OFM_ATTRIBUTION =
@@ -112,9 +114,12 @@ export class ShadowMap {
     this.map.on('sourcedata', (e) => {
       if (e.tile && this.vectorSource && e.sourceId === this.vectorSource && !this._hfTimer && !this._idleHandler && this.hfId > 0) {
         this._tilesSinceBuild = true;
+        // Carte qui n'atteint pas le repos (tuile muette) : la tuile tardive relance le calcul sans attendre « idle ».
+        if (this._idleLate) this._scheduleHeightfield();
       }
     });
     this.map.on('idle', () => {
+      this._idleLate = false;
       if (this._tilesSinceBuild && !this._idleHandler) {
         this._tilesSinceBuild = false;
         this._scheduleHeightfield();
@@ -300,8 +305,11 @@ export class ShadowMap {
       });
       if (style.glyphs) {
         // Même police que les étiquettes du style (les polices disponibles dépendent du serveur de glyphes).
-        const symbolWithFont = layers.find((l) => l.type === 'symbol' && l.layout && Array.isArray(l.layout['text-font']) && l.layout['text-font'].every((f) => typeof f === 'string'));
-        const font = symbolWithFont ? symbolWithFont.layout['text-font'] : ['Noto Sans Regular'];
+        // On préfère une police droite : la première couche de texte est souvent en italique (cours d'eau).
+        const fonts = layers
+          .filter((l) => l.type === 'symbol' && l.layout && Array.isArray(l.layout['text-font']) && l.layout['text-font'].length > 0 && l.layout['text-font'].every((f) => typeof f === 'string'))
+          .map((l) => l.layout['text-font']);
+        const font = fonts.find((f) => !f.some((name) => /italic|oblique/i.test(name))) || fonts[0] || ['Noto Sans Regular'];
         map.addLayer({
           id: 'ombres-sunpath-labels',
           type: 'symbol',
@@ -356,15 +364,28 @@ export class ShadowMap {
 
   _scheduleHeightfield(immediate) {
     clearTimeout(this._hfTimer);
+    clearTimeout(this._idleFallback);
     const run = () => {
       // On attend que toutes les tuiles demandées (bâtiments compris) soient chargées : l'événement « idle ».
       // triggerRepaint garantit qu'il sera émis même si la carte est déjà au repos.
       if (this._idleHandler) this.map.off('idle', this._idleHandler);
       this._idleHandler = () => {
+        clearTimeout(this._idleFallback);
         this._idleHandler = null;
         this._buildHeightfield();
       };
       this.map.once('idle', this._idleHandler);
+      // Filet de sécurité : une tuile qui ne répond jamais repousse « idle » indéfiniment.
+      // Passé le délai, on calcule avec ce qui est chargé ; les tuiles tardives relanceront un calcul.
+      // Carte déjà connue comme bloquée : inutile de rejouer toute l'attente à chaque déplacement.
+      const wait = this._idleLate ? Math.min(IDLE_FALLBACK_MS, 1500) : IDLE_FALLBACK_MS;
+      this._idleFallback = setTimeout(() => {
+        if (!this._idleHandler) return;
+        this.map.off('idle', this._idleHandler);
+        this._idleHandler = null;
+        this._idleLate = true;
+        this._buildHeightfield();
+      }, wait);
       this.map.triggerRepaint();
     };
     this._hfTimer = setTimeout(run, immediate ? 0 : 120);
@@ -399,6 +420,13 @@ export class ShadowMap {
     x1 += W * margin;
     y0 = Math.max(0, y0 - Hh * margin);
     y1 = Math.min(1, y1 + Hh * margin);
+    // Vue aussi large que le monde : une seule largeur de monde suffit, la carte répète l'image de part et d'autre.
+    // Plus large, les copies se chevaucheraient et les ombres s'additionneraient (relief 3D, styles à couches 3D).
+    const wholeWorld = x1 - x0 >= 1;
+    if (wholeWorld) {
+      x0 = cx - 0.5;
+      x1 = cx + 0.5;
+    }
 
     let cellUnits = unitsPerPx / this.options.quality;
     let w = Math.ceil((x1 - x0) / cellUnits);
@@ -407,6 +435,11 @@ export class ShadowMap {
     if (w * h > budget) {
       cellUnits *= Math.sqrt((w * h) / budget);
       w = Math.ceil((x1 - x0) / cellUnits);
+      h = Math.ceil((y1 - y0) / cellUnits);
+    }
+    if (wholeWorld) {
+      // Largeur exacte d'un monde : les copies se touchent sans se recouvrir.
+      cellUnits = 1 / w;
       h = Math.ceil((y1 - y0) / cellUnits);
     }
     const grid = { w, h, originX: x0, originY: y0, cellUnits };

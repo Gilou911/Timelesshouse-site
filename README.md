@@ -34,6 +34,8 @@ Exemples de configuration si vous servez vous-même :
 
 ```nginx
 # nginx
+# Sans barre finale, les chemins relatifs partiraient de la racine du site : on redirige.
+location = /ombres { return 301 /ombres/; }
 location /ombres/ {
     alias /var/www/ombres/;
     try_files $uri $uri/ /ombres/index.html;
@@ -46,6 +48,7 @@ location ^~ /ombres/vendor/ { alias /var/www/ombres/vendor/; add_header Cache-Co
 
 ```caddyfile
 # Caddy
+redir /ombres /ombres/ 301
 handle_path /ombres/* {
     root * /var/www/ombres
     @vendor path /vendor/*
@@ -72,6 +75,23 @@ Le dépôt contient un workflow `.github/workflows/deploy-pages.yml` :
 Un domaine personnalisé GitHub Pages occupe tout le nom d'hôte : si `perso.timelesshouse.org` est déjà servi par une
 autre application, il faut soit l'option A, soit un autre sous-domaine.
 
+### En-têtes de sécurité (facultatif)
+
+L'application tient dans une politique de sécurité de contenu stricte. Celle-ci a été vérifiée dans Chromium avec les
+vrais serveurs de tuiles : plan, bâtiments, relief, satellite et recherche de lieu.
+
+```
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; connect-src 'self' https://tiles.openfreemap.org https://s3.amazonaws.com https://server.arcgisonline.com https://nominatim.openstreetmap.org
+```
+
+- `worker-src blob:` est obligatoire : MapLibre lance ses workers depuis une URL `blob:`. Sans lui, ils sont bloqués.
+- Envoyez l'en-tête sur la page et sur les fichiers de `js/` : le worker des ombres applique la politique reçue avec
+  son propre fichier.
+- Le seul blocage signalé dans la console est le petit script de repli vers unpkg de `index.html`. Il ne sert
+  qu'en l'absence de `vendor/` : gardez ce dossier en place, le repli ne passe pas sous cette politique.
+- `Cross-Origin-Embedder-Policy` n'est pas nécessaire : l'application n'utilise pas `SharedArrayBuffer`.
+- Non vérifié dans Firefox ni Safari.
+
 ## Développer et tester
 
 ```bash
@@ -88,6 +108,18 @@ bâtiments de test à Paris et Chamonix) mais vrai relief, sans dépendre des se
 complète avec OpenFreeMap, servez simplement le dossier avec n'importe quel serveur statique (`npx serve .`,
 `python3 -m http.server`).
 
+Les sources de données se remplacent sans toucher au code : définissez `window.OMBRES_CONFIG` dans un script chargé
+avant `js/app.js`. Toutes les clés sont facultatives.
+
+| Clé | Rôle | Valeur par défaut |
+| --- | --- | --- |
+| `openFreeMap` | Racine du serveur OpenFreeMap : styles, polices, tuiles vectorielles des bâtiments | `https://tiles.openfreemap.org` |
+| `planStyle` | URL du style du fond « Plan » | style `bright` d'OpenFreeMap |
+| `satelliteStyle` | URL d'un style complet pour le fond « Satellite » | style construit autour de `esriUrl` |
+| `esriUrl` | Gabarit d'URL des tuiles d'imagerie | Esri World Imagery |
+| `demUrl` | Gabarit d'URL des tuiles de relief, au format Terrarium | Terrain Tiles sur AWS |
+| `idleFallbackMs` | Délai, en millisecondes, avant de calculer les ombres quand une tuile du fond ne répond pas | `6000` |
+
 ## Comment ça marche
 
 1. **Soleil** (`js/sun.js`) : algorithme NOAA (Meeus) — azimut, élévation avec réfraction, lever/coucher, crépuscules.
@@ -95,6 +127,8 @@ complète avec OpenFreeMap, servez simplement le dossier avec n'importe quel ser
 2. **Champ de hauteurs** (`js/shadow-worker.js`) : pour la vue courante (plus une marge de 30 %), le worker télécharge
    les tuiles de relief Terrarium, les échantillonne en bilinéaire, puis rasterise les emprises de bâtiments
    (hauteur `render_height` des tuiles OpenMapTiles) avec un toit plat posé sur le relief.
+   Le calcul part quand la carte a fini de charger. Si une tuile du fond reste muette, il part quand même au bout
+   de 6 secondes, puis il est refait quand les tuiles en retard arrivent.
 3. **Ombres** (`js/shadow-engine.js`) : balayage de la grille dans la direction opposée au soleil ; chaque cellule
    est à l'ombre si la ligne d'horizon portée depuis le soleil passe au-dessus d'elle. Coût linéaire en nombre de
    cellules, donc un rendu en quelques dizaines de millisecondes même en 1 000 × 1 000.
@@ -126,4 +160,6 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - Les arbres ne sont pas pris en compte.
 - À l'échelle d'un pays ou d'un continent, la direction du soleil est celle du centre de la carte ; seule la limite
   jour/nuit (terminateur) est calculée point par point.
+- Quand la vue est plus large que le monde, la grille couvre exactement un tour de la Terre et la carte la répète
+  de chaque côté. Le relief n'est alors qu'esquissé : une cellule fait plusieurs dizaines de kilomètres.
 - Les zones sous le niveau de la mer (mer Morte, polders) sont ramenées à 0 m pour ne pas faire de la côte une falaise.
