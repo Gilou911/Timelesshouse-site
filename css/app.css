@@ -42,6 +42,9 @@
   --safe-l: env(safe-area-inset-left, 0px);
   --topbar-h: calc(var(--hit) + 16px);
   --timebar-h: 112px;
+  /* Hauteur du bas de la barre du temps : l'écart flottant plus la zone de sécurité. Le panneau et les contrôles
+     de la carte réservent timebar-h + timebar-bottom, sinon la barre les recouvre (iPad, iPhone en paysage). */
+  --timebar-bottom: calc(var(--dock) + var(--safe-b));
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -112,7 +115,7 @@ body {
 /* ---------- Carte ---------- */
 #map { position: fixed; inset: 0; }
 #map .maplibregl-ctrl-top-right { top: calc(var(--topbar-h) + var(--safe-t)); right: calc(var(--dock) - 10px + var(--safe-r)); }
-#map .maplibregl-ctrl-bottom-right, #map .maplibregl-ctrl-bottom-left { bottom: calc(var(--timebar-h) + var(--dock)); }
+#map .maplibregl-ctrl-bottom-right, #map .maplibregl-ctrl-bottom-left { bottom: calc(var(--timebar-h) + var(--timebar-bottom)); }
 #map .maplibregl-ctrl-bottom-right { right: calc(var(--dock) - 10px + var(--safe-r)); }
 #map .maplibregl-ctrl-bottom-left { left: calc(var(--dock) - 10px + var(--safe-l)); }
 #map .maplibregl-ctrl-group { border-radius: var(--r-control); overflow: hidden; }
@@ -175,7 +178,7 @@ body {
 /* ---------- Panneau : une seule surface, des sections séparées par un filet ---------- */
 .panel {
   position: fixed; top: calc(var(--topbar-h) + var(--safe-t)); left: calc(var(--dock) + var(--safe-l)); width: 336px; z-index: 15;
-  max-height: calc(100vh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - 2 * var(--dock) - 8px);
+  max-height: calc(100vh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - var(--timebar-bottom) - var(--dock) - 8px);
   overflow: auto; overscroll-behavior: contain; scrollbar-width: thin;
   padding: 0 20px; border-radius: var(--r-surface);
 }
@@ -267,7 +270,7 @@ body {
 
 /* ---------- Barre du temps : une surface flottante, l'heure en grand ---------- */
 .timebar {
-  position: fixed; left: calc(var(--dock) + var(--safe-l)); right: calc(var(--dock) + var(--safe-r)); bottom: calc(var(--dock) + var(--safe-b)); z-index: 20;
+  position: fixed; left: calc(var(--dock) + var(--safe-l)); right: calc(var(--dock) + var(--safe-r)); bottom: var(--timebar-bottom); z-index: 20;
   padding: 12px 18px; border-radius: var(--r-surface);
   display: flex; flex-direction: column; gap: 4px;
 }
@@ -333,12 +336,12 @@ body {
 }
 
 @supports (height: 100dvh) {
-  .panel { max-height: calc(100dvh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - 2 * var(--dock) - 8px); }
+  .panel { max-height: calc(100dvh - var(--topbar-h) - var(--safe-t) - var(--timebar-h) - var(--timebar-bottom) - var(--dock) - 8px); }
 }
 
 /* ---------- Mobile : la barre du temps tient le bas de l'écran, le panneau devient une feuille posée dessus ---------- */
 @media (max-width: 760px) {
-  :root { --timebar-h: 150px; --dock: 0px; }
+  :root { --timebar-h: 150px; --dock: 0px; --timebar-bottom: 0px; /* la barre colle au bord ; sa marge intérieure porte déjà la zone de sécurité */ }
   .topbar { padding-left: calc(12px + var(--safe-l)); padding-right: calc(12px + var(--safe-r)); }
   #map .maplibregl-ctrl-top-right { right: var(--safe-r); }
   .brand-sub, .brand-name { display: none; }

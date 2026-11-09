@@ -637,7 +637,8 @@ if (timebar && 'ResizeObserver' in window) {
   const ro = new ResizeObserver(() => {
     document.documentElement.style.setProperty('--timebar-h', `${Math.ceil(timebar.getBoundingClientRect().height)}px`);
   });
-  ro.observe(timebar);
+  // La boîte entière : la zone de sécurité est une marge intérieure, invisible pour l'observation du seul contenu.
+  ro.observe(timebar, { box: 'border-box' });
 }
 
 // Premier affichage (la carte déclenchera aussi refreshAll à 'ready').
