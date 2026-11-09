@@ -4,7 +4,7 @@ import { sunPosition, dayInfo, lightPhase, shadowLength } from './sun.js';
 import {
   browserTimeZone, isValidTimeZone, wallToUTC, minutesOfDay, tzLabel, formatMinutes, formatTime, formatDateISO, formatDuration,
 } from './tz.js';
-import { parseHash, buildHash, isValidDateISO } from './state.js';
+import { parseHash, buildHash, isValidDateISO, isValidTime } from './state.js';
 import { searchPlace } from './geocode.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,6 +19,8 @@ const ui = {
   legend: $('legend'), legendMid: $('legend-mid'), legendMax: $('legend-max'),
   opacity: $('opacity'), share: $('share'), shareOk: $('share-ok'),
   play: $('play'), date: $('date'), timeLabel: $('time-label'), tzLabel: $('tz-label'), now: $('now'), time: $('time'), status: $('status'),
+  eventDate: $('event-date'), eventTime: $('event-time'), eventHint: $('event-hint'), eventHelp: $('event-help'),
+  eventActions: $('event-actions'), eventClear: $('event-clear'), moment: $('moment'), eventMark: $('event-mark'),
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -74,16 +76,22 @@ const state = {
   mode: hash.mode === 'exposure' ? 'exposure' : 'shadows',
   playing: false,
   speed: 2,
+  // Cérémonie { date, minutes } et jour du repérage : chacun garde sa propre heure, le jour affiché dit lequel est actif.
+  event: hash.event ? { date: hash.event.date, minutes: hhmmToMinutes(hash.event.time) } : null,
+  eventMinutes: 0,
+  scout: null,
 };
+function hhmmToMinutes(s) {
+  const [h, m] = s.split(':').map(Number);
+  return h * 60 + m;
+}
 {
   const now = new Date();
   state.date = hash.date || formatDateISO(state.tz, now);
-  if (hash.time) {
-    const [h, m] = hash.time.split(':').map(Number);
-    state.minutes = Math.max(0, Math.min(1439, h * 60 + m));
-  } else {
-    state.minutes = Math.floor(minutesOfDay(state.tz, now));
-  }
+  state.minutes = hash.time ? hhmmToMinutes(hash.time) : Math.floor(minutesOfDay(state.tz, now));
+  // Par défaut, le repérage, c'est aujourd'hui, maintenant ; le premier affichage le remplace si un autre jour est montré.
+  state.scout = { date: formatDateISO(state.tz, now), minutes: Math.floor(minutesOfDay(state.tz, now)) };
+  if (state.event) state.eventMinutes = state.event.minutes;
 }
 
 function dateParts() {
@@ -257,6 +265,71 @@ function refreshSun() {
   ui.time.setAttribute('aria-valuetext', formatMinutes(state.minutes));
   ui.date.value = state.date;
   shadowMap.setSunPath(c, hourPositions, { azimuth: pos.azimuth, altitude: pos.altitude });
+  rememberMoment();
+}
+
+// ---------- Cérémonie et repérage ----------
+/** Le jour affiché est celui de la cérémonie ou celui du repérage : on retient l'heure de chacun, et on l'indique. */
+function rememberMoment() {
+  if (!state.event) return;
+  const onEvent = state.date === state.event.date;
+  if (onEvent) state.eventMinutes = state.minutes;
+  else state.scout = { date: state.date, minutes: state.minutes };
+  for (const r of ui.moment.querySelectorAll('input')) r.checked = (r.value === 'event') === onEvent;
+}
+
+/** Affiche un autre moment ; le relief, le point et la carte des heures ne se recalculent que si le jour change. */
+function setMoment(date, minutes) {
+  const dayChanged = date !== state.date;
+  state.date = date;
+  state.minutes = minutes;
+  refreshAll();
+  if (dayChanged && state.point) computeExposure();
+  if (dayChanged && state.mode === 'exposure') requestExposureMap();
+}
+
+function renderEvent() {
+  const ev = state.event;
+  ui.eventDate.value = ev ? ev.date : '';
+  ui.eventTime.value = ev ? formatMinutes(ev.minutes) : '';
+  ui.eventHint.hidden = !!ev;
+  ui.eventHelp.hidden = !ev;
+  ui.eventActions.hidden = !ev;
+  ui.moment.hidden = !ev;
+  ui.eventMark.hidden = !ev;
+  if (ev) {
+    ui.eventMark.style.setProperty('--at', String(ev.minutes / 1439));
+    ui.eventMark.title = `Cérémonie à ${formatMinutes(ev.minutes)}`;
+  }
+}
+
+function setEvent(ev) {
+  state.event = ev;
+  renderEvent();
+  if (!ev) return scheduleHash();
+  // Le jour quitté devient celui du repérage (s'il n'est pas déjà celui de la cérémonie).
+  if (state.date !== ev.date) state.scout = { date: state.date, minutes: state.minutes };
+  setMoment(ev.date, ev.minutes);
+}
+
+function readEventInputs() {
+  if (!isValidDateISO(ui.eventDate.value)) return;
+  // Heure pas encore choisie : celle qui est affichée, écrite dans le champ pour qu'on la voie.
+  if (!isValidTime(ui.eventTime.value)) ui.eventTime.value = formatMinutes(state.minutes);
+  setEvent({ date: ui.eventDate.value, minutes: hhmmToMinutes(ui.eventTime.value) });
+}
+ui.eventDate.addEventListener('change', readEventInputs);
+ui.eventTime.addEventListener('change', readEventInputs);
+// Saisie abandonnée (date incomplète, heure effacée) : les champs reviennent à la cérémonie enregistrée.
+// Sans cérémonie, le champ rempli en premier reste tel quel en attendant l'autre.
+for (const el of [ui.eventDate, ui.eventTime]) el.addEventListener('blur', () => state.event && renderEvent());
+ui.eventClear.addEventListener('click', () => setEvent(null));
+for (const r of ui.moment.querySelectorAll('input')) {
+  r.addEventListener('change', () => {
+    if (!r.checked || !state.event) return;
+    if (r.value === 'event') setMoment(state.event.date, state.eventMinutes);
+    else setMoment(state.scout.date, state.scout.minutes);
+  });
 }
 
 function refreshAll() {
@@ -416,12 +489,7 @@ ui.time.addEventListener('input', () => {
   scheduleHash();
 });
 ui.date.addEventListener('change', () => {
-  if (isValidDateISO(ui.date.value) && ui.date.value !== state.date) {
-    state.date = ui.date.value;
-    refreshAll();
-    if (state.point) computeExposure();
-    if (state.mode === 'exposure') requestExposureMap();
-  }
+  if (isValidDateISO(ui.date.value) && ui.date.value !== state.date) setMoment(ui.date.value, state.minutes);
 });
 // Saisie abandonnée sur une date vide ou hors bornes : le champ revient à la date réellement affichée.
 ui.date.addEventListener('blur', () => {
@@ -429,11 +497,7 @@ ui.date.addEventListener('blur', () => {
 });
 ui.now.addEventListener('click', () => {
   const now = new Date();
-  state.date = formatDateISO(state.tz, now);
-  state.minutes = Math.floor(minutesOfDay(state.tz, now));
-  refreshAll();
-  if (state.point) computeExposure();
-  if (state.mode === 'exposure') requestExposureMap();
+  setMoment(formatDateISO(state.tz, now), Math.floor(minutesOfDay(state.tz, now)));
 });
 
 let playTimer = null;
@@ -631,6 +695,7 @@ function syncHash(force = false) {
     point: state.point,
     mode: state.mode,
     opacity: state.opacity,
+    event: state.event && { date: state.event.date, time: formatMinutes(state.event.minutes) },
   });
   if (h !== location.hash) history.replaceState(null, '', h);
 }
@@ -646,6 +711,7 @@ if (timebar && 'ResizeObserver' in window) {
 }
 
 // Premier affichage (la carte déclenchera aussi refreshAll à 'ready').
+renderEvent();
 refreshAll();
 if (state.point) setPoint(state.point);
 tzReady.then(() => {

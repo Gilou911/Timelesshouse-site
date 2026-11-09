@@ -212,6 +212,11 @@ body {
 .exposure-bar { height: 6px; border-radius: 2px; background: var(--fill-2); overflow: hidden; margin-bottom: 8px; }
 .exposure-bar i { display: block; height: 100%; background: var(--sun); position: relative; float: left; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.row.end { justify-content: flex-end; }
+/* Champs côte à côte, libellé permanent au-dessus. */
+.fields { display: flex; gap: 8px; margin-top: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--text-2); }
+.field:first-child { flex: 1.4; }
 #exposure-meta { font-size: 0.8125rem; color: var(--text-2); }
 .link {
   flex: none; min-height: var(--hit); padding: 0 4px; border: 0; background: none; color: var(--accent); cursor: pointer;
@@ -285,16 +290,27 @@ body {
 .icon-btn .ic-pause { display: none; }
 .icon-btn.playing .ic-play { display: none; }
 .icon-btn.playing .ic-pause { display: block; }
-#date {
+#date, .field input {
   min-height: var(--hit); padding: 0 10px; border: 0; border-radius: var(--r-control);
   background: var(--fill); color: var(--text); font: inherit; font-size: 1rem; font-variant-numeric: tabular-nums;
 }
+.field input { width: 100%; min-width: 0; }
+/* Cérémonie ou repérage : les mêmes segments que dans le panneau, posés dans la ligne du jour. */
+.timebar .seg { flex: none; margin: 0; }
+.moment span { padding: 0 14px; }
 .time-label {
   flex: none; min-width: 3.1ch; font-size: 2.75rem; font-weight: 300; line-height: 1; letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums; text-align: right;
 }
-.tz-label { margin-left: auto; min-width: 0; font-family: var(--mono); font-size: 0.75rem; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Base nulle : le fuseau se réduit (points de suspension) au lieu de passer à la ligne quand la ligne du jour se replie. */
+.tz-label { flex: 1 1 0; min-width: 0; text-align: right; font-family: var(--mono); font-size: 0.75rem; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slider-row { position: relative; flex: 1; min-width: 0; }
+/* Heure de la cérémonie : un trait d'encre au-dessus de la piste, sous le pouce (centre du pouce = 11 px + (largeur − 22 px) × part du jour). */
+.event-mark {
+  position: absolute; top: calc(var(--hit) / 2 - 14px); left: calc(11px + (100% - 22px) * var(--at, 0)); width: 2px; height: 11px;
+  margin-left: -1px; border-radius: 1px; background: var(--text); pointer-events: none;
+}
+.slider-row #time { position: relative; z-index: 1; }
 /* L'input garde la hauteur d'une cible tactile ; la piste porte la bande jour/nuit (--daylight, posée par le script). */
 #time {
   -webkit-appearance: none; appearance: none; display: block; width: 100%; height: var(--hit); margin: 0;
@@ -367,6 +383,9 @@ body {
   .hint, .exposure-list, .rows dt { font-size: 1rem; }
   .time-label { font-size: 2rem; }
   .tz-label { font-family: var(--font); } /* plus étroite que la chasse fixe : le fuseau tient mieux */
+  /* Cérémonie | Repérage prend toute la première ligne ; la date et « Maintenant » passent dessous. */
+  .day-row { flex-wrap: wrap; row-gap: 6px; }
+  .timebar .moment { flex: 1 1 100%; }
   #date { padding: 0 6px; }
   .btn.small { padding: 0 10px; }
   #map .maplibregl-ctrl-bottom-left { display: none; }

@@ -43,6 +43,17 @@ test('hash invalide ou vide', () => {
   assert.equal(parseHash('#48.8/2.3/12?p=48.8,200').point, undefined, 'longitude du point hors bornes ignorée');
 });
 
+test('cérémonie dans le lien : aller-retour, valeurs invalides ignorées', () => {
+  const st = { lat: 48.85, lng: 2.35, zoom: 15, date: '2026-11-10', time: '11:00', event: { date: '2027-06-14', time: '16:00' } };
+  const h = buildHash(st);
+  assert.ok(/ev=2027-06-14T16:00/.test(h), `cérémonie lisible : ${h}`);
+  assert.deepEqual(parseHash(h).event, { date: '2027-06-14', time: '16:00' });
+  assert.equal(parseHash(buildHash({ ...st, event: null })).event, undefined);
+  for (const bad of ['2027-02-30T16:00', '2027-06-14T25:00', '2027-06-14', 'n-importe-quoi', '2027-06-14T16:00:00']) {
+    assert.equal(parseHash(`#48.8/2.3/12?ev=${bad}`).event, undefined, `refusée : ${bad}`);
+  }
+});
+
 test('date et heure du lien : seules les valeurs réelles sont acceptées', () => {
   for (const d of ['2026-11-09', '2024-02-29', '1900-01-01', '2100-12-31']) assert.ok(isValidDateISO(d), d);
   for (const d of ['2026-02-31', '2025-02-29', '2026-13-01', '2026-00-10', '2026-04-31', '1899-12-31', '2101-01-01', '0002-01-01', '9999-99-99', '2026-1-9', '', null, undefined]) {

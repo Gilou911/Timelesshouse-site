@@ -57,6 +57,19 @@
     </section>
 
     <section class="card">
+      <h2>Cérémonie</h2>
+      <p class="hint" id="event-hint">Indiquez la date et l'heure de la cérémonie pour voir où sera l'ombre ce jour-là, puis comparez avec le jour du repérage.</p>
+      <p class="hint" id="event-help" hidden>Passez de la cérémonie au jour du repérage dans la barre du temps ; chacun garde son heure. Le trait sur la frise marque l'heure de la cérémonie.</p>
+      <div class="fields">
+        <label class="field">Date<input type="date" id="event-date" min="1900-01-01" max="2100-12-31"></label>
+        <label class="field">Heure<input type="time" id="event-time"></label>
+      </div>
+      <div class="row end" id="event-actions" hidden>
+        <button type="button" id="event-clear" class="link">Retirer la cérémonie</button>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Ensoleillement d'un point</h2>
       <p class="hint" id="exposure-hint">Choisissez un endroit sur la carte pour savoir combien d'heures de soleil il reçoit ce jour-là.</p>
       <div id="exposure" class="exposure" hidden>
@@ -104,6 +117,10 @@
 
   <footer class="timebar" aria-label="Date et heure">
     <div class="day-row">
+      <div class="seg moment" id="moment" role="radiogroup" aria-label="Jour affiché" hidden>
+        <label><input type="radio" name="moment" value="event"><span>Cérémonie</span></label>
+        <label><input type="radio" name="moment" value="scout"><span>Repérage</span></label>
+      </div>
       <input type="date" id="date" min="1900-01-01" max="2100-12-31" aria-label="Date">
       <button type="button" id="now" class="btn small" title="Revenir à la date et à l'heure actuelles">Maintenant</button>
       <span id="tz-label" class="tz-label">—</span>
@@ -114,6 +131,7 @@
         <svg class="ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
       </button>
       <div class="slider-row">
+        <span class="event-mark" id="event-mark" hidden></span>
         <input type="range" id="time" min="0" max="1439" step="1" value="720" aria-label="Heure de la journée">
         <div class="ticks" aria-hidden="true"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>
       </div>
