@@ -260,14 +260,14 @@ export class ShadowMap {
         type: 'line',
         source: 'ombres-sunpath',
         filter: ['==', ['get', 'kind'], 'arc'],
-        paint: { 'line-color': '#f5a623', 'line-width': 2, 'line-dasharray': [2, 2], 'line-opacity': 0.9 },
+        paint: { 'line-color': '#ff9500', 'line-width': 2, 'line-dasharray': [2, 2], 'line-opacity': 0.9 },
       });
       map.addLayer({
         id: 'ombres-sunpath-ticks',
         type: 'line',
         source: 'ombres-sunpath',
         filter: ['==', ['get', 'kind'], 'tick'],
-        paint: { 'line-color': '#f5a623', 'line-width': 1.5, 'line-opacity': 0.8 },
+        paint: { 'line-color': '#ff9500', 'line-width': 1.5, 'line-opacity': 0.8 },
       });
       map.addLayer({
         id: 'ombres-sunpath-shadow',
@@ -283,7 +283,7 @@ export class ShadowMap {
         source: 'ombres-sunpath',
         filter: ['==', ['get', 'kind'], 'ray'],
         layout: { 'line-cap': 'round' },
-        paint: { 'line-color': '#ffd23f', 'line-width': 4 },
+        paint: { 'line-color': '#ffcc00', 'line-width': 4 },
       });
       map.addLayer({
         id: 'ombres-sunpath-sun',
@@ -292,7 +292,7 @@ export class ShadowMap {
         filter: ['==', ['get', 'kind'], 'sun'],
         paint: {
           'circle-radius': 8,
-          'circle-color': '#ffd23f',
+          'circle-color': '#ffcc00',
           'circle-stroke-color': '#ffffff',
           'circle-stroke-width': 2,
           'circle-opacity': ['case', ['get', 'up'], 1, 0.35],

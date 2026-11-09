@@ -176,9 +176,10 @@ function refreshDay() {
     const m = minutesInDay(d);
     return `${(((m == null ? fallback : m) / 1440) * 100).toFixed(2)}%`;
   };
-  const night = '#1a2340';
-  const dawn = '#f5a623';
-  const dayc = '#ffd23f';
+  // Couleurs du thème (clair ou sombre), résolues par la feuille de style.
+  const night = 'var(--night)';
+  const dawn = 'var(--dawn)';
+  const dayc = 'var(--day)';
   let bg;
   if (day.status === 'polar-day') bg = dayc;
   else if (day.status === 'polar-night') bg = night;
@@ -340,7 +341,7 @@ async function computeExposure() {
   }
   const alt = res.elevation != null ? `altitude ${Math.round(res.elevation)} m` : '';
   const roof = res.surface != null && res.elevation != null && res.surface - res.elevation > 1 ? ` · sur un toit (${Math.round(res.surface - res.elevation)} m)` : '';
-  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à 1,5 m du sol`;
+  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à 1,5 m ${roof ? 'au-dessus du toit' : 'du sol'}`;
 }
 
 // ---------- Événements carte ----------

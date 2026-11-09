@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Ombres · soleil et ombres sur la carte — Timeless House</title>
   <meta name="description" content="Visualisez la course du soleil et les ombres du relief et des bâtiments à n'importe quelle date et heure, partout dans le monde.">
-  <meta name="theme-color" content="#101828">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
@@ -13,11 +14,12 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+  <h1 class="sr-only">Ombres, le soleil et les ombres sur la carte</h1>
   <div id="map" role="application" aria-label="Carte des ombres"></div>
 
   <header class="topbar">
     <a class="brand" href="./" title="Ombres — Timeless House">
-      <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="13" r="6" fill="#ffd23f"/><g stroke="#ffd23f" stroke-width="2" stroke-linecap="round"><path d="M16 2v3M16 21v3M5 13h3M24 13h3M8.2 5.2l2.1 2.1M21.7 18.7l2.1 2.1M8.2 20.8l2.1-2.1M21.7 7.3l2.1-2.1"/></g><path d="M4 29c6-3 18-3 24 0" stroke="#1a2340" stroke-width="3" stroke-linecap="round" fill="none"/></svg>
+      <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="13" r="6" fill="#ffd23f"/><g stroke="#ffd23f" stroke-width="2" stroke-linecap="round"><path d="M16 2v3M16 21v3M5 13h3M24 13h3M8.2 5.2l2.1 2.1M21.7 18.7l2.1 2.1M8.2 20.8l2.1-2.1M21.7 7.3l2.1-2.1"/></g><path d="M4 29c6-3 18-3 24 0" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/></svg>
       <span class="brand-name">Ombres</span>
       <span class="brand-sub">Timeless House</span>
     </a>
@@ -39,8 +41,7 @@
 
   <aside id="panel" class="panel" aria-label="Informations et réglages">
     <section class="card">
-      <h2>Soleil</h2>
-      <div class="phase" id="phase">—</div>
+      <div class="section-head"><h2>Soleil</h2><span class="phase" id="phase">—</span></div>
       <dl class="grid2">
         <div><dt>Azimut</dt><dd id="azimuth">—</dd></div>
         <div><dt>Élévation</dt><dd id="altitude">—</dd></div>
@@ -55,7 +56,7 @@
 
     <section class="card">
       <h2>Ensoleillement d'un point</h2>
-      <p class="hint" id="exposure-hint">Cliquez sur la carte pour mesurer combien d'heures de soleil reçoit un endroit ce jour-là.</p>
+      <p class="hint" id="exposure-hint">Choisissez un endroit sur la carte pour savoir combien d'heures de soleil il reçoit ce jour-là.</p>
       <div id="exposure" class="exposure" hidden>
         <div class="exposure-total"><span id="exposure-hours">—</span><small>de soleil direct</small></div>
         <ul id="exposure-list" class="exposure-list"></ul>
