@@ -329,7 +329,7 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
  */
 export function depthToRGBA(depth, w, h, out, style) {
   const n = w * h;
-  const rgba = out || new Uint8ClampedArray(n * 4);
+  const rgba = out && out.length === n * 4 ? out : new Uint8ClampedArray(n * 4);
   const [sr, sg, sb, sa] = style.shadow;
   const [nr, ng, nb, na] = style.night;
   const soft = !!style.soft;
@@ -418,9 +418,9 @@ export function accumulateExposure(H, w, h, samples, stepMinutes, cellMeters, ro
   for (let k = 0; k < samples.length; k++) {
     const s = samples[k];
     const perCell = grid && Number.isFinite(s.declination) && Number.isFinite(s.minutesUTC);
-    if (s.altitude > 0 || perCell) {
-      sweepShadows(H, w, h, s.azimuth, s.altitude, cellMeters, depth, rowScale);
-      if (perCell) applyNightMask(depth, grid, s, s.altitude > 0);
+    if (sunIsUp(s) || perCell) {
+      if (grid) renderShadows(H, grid, s, cellMeters, rowScale, depth);
+      else sweepShadows(H, w, h, s.azimuth, s.altitude, cellMeters, depth, rowScale);
       for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += stepMinutes;
     }
     if (onProgress) onProgress(k + 1, samples.length);
@@ -453,9 +453,9 @@ export function exposureColor(t) {
 }
 
 /** Convertit le cumul (minutes) en image RGBA ; maxMinutes = durée du jour (ou valeur max). */
-export function exposureToRGBA(acc, w, h, out, maxMinutes, alpha) {
-  const n = w * h;
-  const rgba = out || new Uint8ClampedArray(n * 4);
+let EXPOSURE_LUT = null;
+function exposureLUT() {
+  if (EXPOSURE_LUT) return EXPOSURE_LUT;
   const lut = new Uint8ClampedArray(257 * 3);
   for (let i = 0; i <= 256; i++) {
     const c = exposureColor(i / 256);
@@ -463,6 +463,14 @@ export function exposureToRGBA(acc, w, h, out, maxMinutes, alpha) {
     lut[i * 3 + 1] = c[1];
     lut[i * 3 + 2] = c[2];
   }
+  EXPOSURE_LUT = lut;
+  return lut;
+}
+
+export function exposureToRGBA(acc, w, h, out, maxMinutes, alpha) {
+  const n = w * h;
+  const rgba = out && out.length === n * 4 ? out : new Uint8ClampedArray(n * 4);
+  const lut = exposureLUT();
   const scale = maxMinutes > 0 ? 256 / maxMinutes : 0;
   for (let i = 0; i < n; i++) {
     let k = Math.round(acc[i] * scale);
@@ -506,5 +514,27 @@ export function applyNightMask(depth, grid, sun, centerLit) {
       else if (!centerLit) depth[row + x] = 0;
     }
   }
+  return depth;
+}
+
+export const HORIZON_ALTITUDE = -0.833; // élévation géométrique du centre du soleil au lever/coucher (bord supérieur)
+
+/** Le soleil est-il levé ? Même définition que le lever/coucher affichés (bord supérieur du disque). */
+export function sunIsUp(sun) {
+  const geom = Number.isFinite(sun.altitudeGeometric) ? sun.altitudeGeometric : sun.altitude;
+  return geom > HORIZON_ALTITUDE;
+}
+
+/**
+ * Rendu complet des ombres pour un instant : balayage (avec élévation apparente, bornée à un minimum quand le soleil
+ * affleure l'horizon) puis masque jour/nuit cellule par cellule quand les paramètres solaires sont fournis.
+ * Les deux étapes partagent la même définition du soleil levé, pour éviter tout éclair au lever/coucher.
+ */
+export function renderShadows(H, grid, sun, cellMeters, rowScale, depth) {
+  const { w, h } = grid;
+  const up = sunIsUp(sun);
+  const altitude = up ? Math.max(sun.altitude, 0.05) : Math.min(sun.altitude, 0);
+  sweepShadows(H, w, h, sun.azimuth, altitude, cellMeters, depth, rowScale);
+  if (Number.isFinite(sun.declination) && Number.isFinite(sun.minutesUTC)) applyNightMask(depth, grid, sun, up);
   return depth;
 }

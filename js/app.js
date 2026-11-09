@@ -67,7 +67,7 @@ const state = {
   buildings3d: hash.buildings3d ?? true,
   terrain: hash.terrain ?? false,
   shadows: hash.shadows ?? true,
-  opacity: 0.45,
+  opacity: hash.opacity ?? 0.45,
   point: hash.point || null,
   mode: hash.mode === 'exposure' ? 'exposure' : 'shadows',
   playing: false,
@@ -145,6 +145,7 @@ function focusLngLat() {
 /** Paramètres permettant au worker de recalculer l'élévation du soleil en chaque cellule (terminateur). */
 function sunExtras(t, pos) {
   return {
+    altitudeGeometric: pos.altitudeGeometric,
     declination: pos.declination,
     eqTime: pos.equationOfTime,
     minutesUTC: t.getUTCHours() * 60 + t.getUTCMinutes() + t.getUTCSeconds() / 60,
@@ -202,6 +203,7 @@ function refreshDay() {
 }
 
 /** Échantillons du jour (toutes les 20 min) au centre de la carte, pour la carte des heures de soleil. */
+let exposureMapSeq = 0;
 function buildExposureSamples() {
   const center = map.getCenter();
   const { y, mo, d } = dateParts();
@@ -212,13 +214,13 @@ function buildExposureSamples() {
     const p = sunPosition(t, center.lat, center.lng);
     samples.push({ azimuth: p.azimuth, altitude: p.altitude, ...sunExtras(t, p) });
   }
-  return { samples, stepMinutes, maxMinutes: day ? day.dayLengthMinutes : 0 };
+  return { samples, stepMinutes, maxMinutes: day ? day.dayLengthMinutes : 0, seq: ++exposureMapSeq };
 }
 
 /** Demande explicite d'une carte des heures de soleil (changement de mode, de date ou de fuseau). */
 function requestExposureMap() {
-  const { samples, stepMinutes, maxMinutes } = buildExposureSamples();
-  shadowMap.requestExposureMap(samples, stepMinutes, maxMinutes);
+  const { samples, stepMinutes, maxMinutes, seq } = buildExposureSamples();
+  shadowMap.requestExposureMap(samples, stepMinutes, maxMinutes, seq);
   setStatus('Calcul des heures de soleil…');
 }
 
@@ -298,8 +300,11 @@ async function computeExposure() {
   if (seq !== exposureSeq) return;
   debug.lastExposure = res;
   if (!res || !res.lit) {
-    ui.exposureHours.textContent = '—';
-    ui.exposureList.innerHTML = '<li>Point hors de la zone calculée : recentrez la carte dessus.</li>';
+    ui.exposureHours.textContent = '…';
+    ui.exposureList.innerHTML =
+      res && res.reason === 'outside'
+        ? '<li>Point hors de la zone calculée : recentrez la carte dessus.</li>'
+        : '<li>Calcul du relief en cours…</li>';
     ui.exposureBar.innerHTML = '';
     ui.exposureMeta.textContent = '';
     return;
@@ -360,6 +365,11 @@ map.on('moveend', () => {
 });
 shadowMap.on('heightfield', (stats) => {
   debug.stats = stats;
+  if (stats.terrainUnsupported) {
+    setStatus('Ce navigateur est trop ancien pour le relief (OffscreenCanvas absent) : seules les ombres des bâtiments sont calculées.', true);
+    if (state.point) computeExposure();
+    return;
+  }
   if (stats.tilesMissing > 0 && stats.tilesLoaded === 0) {
     setStatus('Relief indisponible (tuiles non chargées) : seules les ombres des bâtiments sont calculées.', true);
     if (state.point) computeExposure();
@@ -484,7 +494,10 @@ ui.opacity.addEventListener('input', () => {
   state.opacity = Number(ui.opacity.value);
   // Un rendu complet par cran serait trop : on regroupe les changements rapprochés.
   clearTimeout(opacityTimer);
-  opacityTimer = setTimeout(() => shadowMap.setOpacity(state.opacity), 60);
+  opacityTimer = setTimeout(() => {
+    shadowMap.setOpacity(state.opacity);
+    scheduleHash();
+  }, 60);
 });
 for (const r of document.querySelectorAll('input[name="mode"]')) {
   r.checked = r.value === state.mode;
@@ -610,6 +623,7 @@ function syncHash(force = false) {
     shadows: state.shadows,
     point: state.point,
     mode: state.mode,
+    opacity: state.opacity,
   });
   if (h !== location.hash) history.replaceState(null, '', h);
 }

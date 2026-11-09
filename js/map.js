@@ -101,7 +101,7 @@ export class ShadowMap {
     this.worker = new Worker(new URL('./shadow-worker.js', import.meta.url), { type: 'module' });
     this.worker.onmessage = (ev) => this._onWorkerMessage(ev.data);
     this.worker.onerror = (ev) => this.emit('error', { message: ev.message || 'worker' });
-    this.worker.postMessage({ type: 'config', demTemplate: DEM_URL, style: this._style() });
+    this.worker.postMessage({ type: 'config', demTemplate: DEM_URL, style: this._style(), mode: this.options.mode });
 
     this.map.on('style.load', () => this._installLayers());
     this.map.on('load', () => {
@@ -154,14 +154,13 @@ export class ShadowMap {
   }
 
   /** Demande la carte des heures de soleil pour les échantillons donnés (azimut/élévation) du jour. */
-  requestExposureMap(samples, stepMinutes, maxMinutes) {
-    this.lastExposureRequest = { samples, stepMinutes, maxMinutes };
+  requestExposureMap(samples, stepMinutes, maxMinutes, seq = 0) {
     this.frameInFlight = true;
     clearTimeout(this._renderGuard);
     this._renderGuard = setTimeout(() => {
       this.frameInFlight = false;
     }, 30000);
-    this.worker.postMessage({ type: 'exposure-map', requestId: ++this.requestId, samples, stepMinutes, maxMinutes });
+    this.worker.postMessage({ type: 'exposure-map', requestId: ++this.requestId, samples, stepMinutes, maxMinutes, seq });
   }
 
   /** Re-crée nos sources/couches après chaque chargement de style. */
@@ -420,7 +419,6 @@ export class ShadowMap {
     this.emit('computing', { id, grid, demZoom, buildings: buildings.polyStart.length - 1 });
     // En mode « heures de soleil », les échantillons du jour partent avec le relief : une seule carte par calcul.
     const exposure = this.options.mode === 'exposure' && typeof this.options.exposureSamples === 'function' ? this.options.exposureSamples() : null;
-    if (exposure) this.lastExposureRequest = exposure;
     this.worker.postMessage(
       {
         type: 'heightfield',
@@ -547,6 +545,8 @@ export class ShadowMap {
     }
     const img = new ImageData(new Uint8ClampedArray(msg.buffer), w, h);
     this.ctx.putImageData(img, 0, 0);
+    // Le tampon repart au worker pour être réutilisé (transfert sans copie).
+    this.worker.postMessage({ type: 'recycle', buffer: msg.buffer }, [msg.buffer]);
     const src = this.map.getSource('ombres');
     if (src && typeof src.play === 'function') {
       src.play();
@@ -582,6 +582,11 @@ export class ShadowMap {
 
   _requestRender() {
     if (this.options.mode === 'exposure') return;
+    if (!this.options.shadows) {
+      // Couche masquée : inutile de calculer ; la prochaine image sera demandée au ré-affichage.
+      this.sunDirty = true;
+      return;
+    }
     if (this.frameInFlight) {
       this.sunDirty = true;
       return;
@@ -612,6 +617,14 @@ export class ShadowMap {
   setShadowsVisible(v) {
     this.options.shadows = v;
     if (this.map.getLayer('ombres-overlay')) this.map.setLayoutProperty('ombres-overlay', 'visibility', v ? 'visible' : 'none');
+    if (v) {
+      // Pendant le masquage, la texture GPU n'a pas été mise à jour : on redemande une image fraîche.
+      if (this.options.mode === 'exposure') this.worker.postMessage({ type: 'config', style: this._style() });
+      else {
+        this.sunDirty = false;
+        this._requestRender();
+      }
+    }
   }
 
   setBuildings3d(v) {

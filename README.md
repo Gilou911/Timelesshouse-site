@@ -11,7 +11,7 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 - Clic sur la carte : heures de soleil direct reçues par ce point ce jour-là, avec les créneaux.
 - Course du soleil tracée autour du point (graduations horaires, direction du soleil et de l'ombre).
 - Bâtiments 3D, relief 3D, fond plan ou satellite, intensité des ombres réglable.
-- Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (tout l'état est dans l'URL).
+- Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (vue, date, heure, couches, mode, intensité, point).
 - Fuseau horaire détecté automatiquement d'après l'endroit affiché.
 - Sans clé d'API, sans compte, sans serveur : des fichiers statiques et des sources de données ouvertes.
 
@@ -37,6 +37,8 @@ Exemples de configuration si vous servez vous-même :
 location /ombres/ {
     alias /var/www/ombres/;
     try_files $uri $uri/ /ombres/index.html;
+    # index.html, css/ et js/ doivent être revalidés à chaque visite (le worker et ses modules évoluent ensemble).
+    add_header Cache-Control "no-cache";
 }
 # Les fichiers de vendor/ sont référencés avec ?v=<version> : ils peuvent être mis en cache longtemps.
 location ^~ /ombres/vendor/ { alias /var/www/ombres/vendor/; add_header Cache-Control "public, max-age=31536000, immutable"; }
@@ -46,6 +48,9 @@ location ^~ /ombres/vendor/ { alias /var/www/ombres/vendor/; add_header Cache-Co
 # Caddy
 handle_path /ombres/* {
     root * /var/www/ombres
+    @vendor path /vendor/*
+    header @vendor Cache-Control "public, max-age=31536000, immutable"
+    header Cache-Control no-cache
     file_server
 }
 ```

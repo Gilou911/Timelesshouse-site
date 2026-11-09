@@ -1,9 +1,13 @@
 // Web Worker : télécharge le relief (tuiles Terrarium), construit le champ de hauteurs
 // (relief + bâtiments) et calcule les ombres à la demande.
 import {
-  DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, sweepShadows, depthToRGBA, pointExposure, rowScaleFactors,
-  accumulateExposure, exposureToRGBA, applyNightMask,
+  DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, depthToRGBA, pointExposure, rowScaleFactors,
+  exposureToRGBA, renderShadows, sunIsUp,
 } from './shadow-engine.js';
+
+// Décodage des tuiles PNG dans le worker : OffscreenCanvas + createImageBitmap (Safari ≥ 16.4, Chrome, Firefox).
+const CAN_DECODE = typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap !== 'undefined';
+let spareBuffer = null; // tampon RGBA recyclé par la page (évite une allocation de plusieurs Mo par image)
 
 const TILE_SIZE = 256;
 const MAX_CACHE = 240; // ~60 Mo de hauteurs décodées au maximum
@@ -52,15 +56,23 @@ function fetchTile(z, x, y) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+      let blob = null;
       try {
         const res = await fetch(url, { mode: 'cors', credentials: 'omit', signal: ctrl.signal });
         if (res.status === 404) return null; // tuile inexistante : inutile d'insister
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await decodeBlob(await res.blob());
+        blob = await res.blob();
       } catch {
-        // on réessaie une fois
+        // erreur réseau ou délai dépassé : on réessaie une fois
       } finally {
         clearTimeout(timer);
+      }
+      if (blob) {
+        try {
+          return await decodeBlob(blob);
+        } catch {
+          return null; // image invalide : inutile de retélécharger
+        }
       }
     }
     return null;
@@ -93,8 +105,9 @@ async function buildHeightfield(msg) {
   const T = new Float32Array(w * h);
   let tilesLoaded = 0;
   let tilesMissing = 0;
+  const terrainUnsupported = useTerrain && !CAN_DECODE;
 
-  if (useTerrain) {
+  if (useTerrain && CAN_DECODE) {
     const scale = Math.pow(2, demZoom); // tuiles par unité Mercator
     const n = 1 << demZoom;
     const tx0 = Math.floor(grid.originX * scale);
@@ -142,10 +155,30 @@ async function buildHeightfield(msg) {
   postMessage({
     type: 'heightfield-ready',
     id,
-    stats: { tilesLoaded, tilesMissing, buildings: touched, minH, maxH, w, h },
+    stats: { tilesLoaded, tilesMissing, buildings: touched, minH, maxH, w, h, terrainUnsupported },
   });
-  if (mode === 'exposure' && (msg.exposure || lastExposure)) exposureMap({ ...(msg.exposure || lastExposure) });
-  else if (lastSun) render({ id, ...lastSun });
+  if (mode === 'exposure') {
+    // La demande la plus récente l'emporte (une date changée pendant le téléchargement du relief, par exemple).
+    const ex = newestExposure(msg.exposure, lastExposure);
+    if (ex) exposureMap({ ...ex });
+  } else if (lastSun) {
+    render({ id, ...lastSun });
+  }
+}
+
+function newestExposure(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return (b.seq || 0) > (a.seq || 0) ? b : a;
+}
+
+function takeBuffer(n) {
+  if (spareBuffer && spareBuffer.byteLength === n) {
+    const out = new Uint8ClampedArray(spareBuffer);
+    spareBuffer = null;
+    return out;
+  }
+  return null;
 }
 
 /** Recolore la dernière image sans recalcul (changement d'opacité). */
@@ -154,10 +187,10 @@ function recolor() {
   const { grid } = current;
   const { w, h } = grid;
   if (mode === 'exposure' && current.acc) {
-    const rgba = exposureToRGBA(current.acc, w, h, null, current.accMaxMinutes, style.exposureAlpha || 165);
+    const rgba = exposureToRGBA(current.acc, w, h, takeBuffer(w * h * 4), current.accMaxMinutes, style.exposureAlpha || 165);
     postMessage({ type: 'frame', id: current.id, w, h, buffer: rgba.buffer, ms: 0, kind: 'exposure', maxMinutes: current.accMaxMinutes, maxAcc: current.accMax }, [rgba.buffer]);
   } else if (mode === 'shadows' && current.depthValid) {
-    const rgba = depthToRGBA(current.depth, w, h, null, style);
+    const rgba = depthToRGBA(current.depth, w, h, takeBuffer(w * h * 4), style);
     postMessage({ type: 'frame', id: current.id, w, h, buffer: rgba.buffer, ms: 0 }, [rgba.buffer]);
   } else if (mode === 'exposure' && lastExposure) {
     exposureMap({ ...lastExposure });
@@ -168,7 +201,9 @@ function recolor() {
 
 /** Carte des heures de soleil : un balayage par échantillon, avec cession du fil entre deux pour rester réactif. */
 async function exposureMap(msg) {
-  lastExposure = { samples: msg.samples, stepMinutes: msg.stepMinutes, maxMinutes: msg.maxMinutes };
+  // On ne garde que la demande la plus récente (numéro de séquence croissant côté page).
+  if (lastExposure && (lastExposure.seq || 0) > (msg.seq || 0)) msg = { ...lastExposure, requestId: msg.requestId };
+  lastExposure = { samples: msg.samples, stepMinutes: msg.stepMinutes, maxMinutes: msg.maxMinutes, seq: msg.seq || 0 };
   if (!current) {
     postMessage({ type: 'frame-skipped', requestId: msg.requestId });
     return;
@@ -186,9 +221,8 @@ async function exposureMap(msg) {
       return;
     }
     const perCell = Number.isFinite(s.declination) && Number.isFinite(s.minutesUTC);
-    if (s.altitude > 0 || perCell) {
-      sweepShadows(H, w, h, s.azimuth, s.altitude, cellMeters, depth, rowScale);
-      if (perCell) applyNightMask(depth, grid, s, s.altitude > 0);
+    if (sunIsUp(s) || perCell) {
+      renderShadows(H, grid, s, cellMeters, rowScale, depth);
       for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += msg.stepMinutes;
     }
     k++;
@@ -207,7 +241,7 @@ async function exposureMap(msg) {
   current.acc = acc;
   current.accMax = maxAcc;
   current.accMaxMinutes = maxMinutes;
-  const rgba = exposureToRGBA(acc, w, h, null, maxMinutes, style.exposureAlpha || 165);
+  const rgba = exposureToRGBA(acc, w, h, takeBuffer(w * h * 4), maxMinutes, style.exposureAlpha || 165);
   postMessage(
     { type: 'frame', id: current.id, requestId: msg.requestId, w, h, buffer: rgba.buffer, ms: performance.now() - t0, kind: 'exposure', maxMinutes, maxAcc },
     [rgba.buffer],
@@ -215,7 +249,14 @@ async function exposureMap(msg) {
 }
 
 function sunFromMsg(msg) {
-  return { azimuth: msg.azimuth, altitude: msg.altitude, declination: msg.declination, eqTime: msg.eqTime, minutesUTC: msg.minutesUTC };
+  return {
+    azimuth: msg.azimuth,
+    altitude: msg.altitude,
+    altitudeGeometric: msg.altitudeGeometric,
+    declination: msg.declination,
+    eqTime: msg.eqTime,
+    minutesUTC: msg.minutesUTC,
+  };
 }
 
 function render(msg) {
@@ -228,12 +269,9 @@ function render(msg) {
   const { grid, H, depth, cellMeters, rowScale } = current;
   const { w, h } = grid;
   const t0 = performance.now();
-  sweepShadows(H, w, h, msg.azimuth, msg.altitude, cellMeters, depth, rowScale);
-  if (Number.isFinite(msg.declination) && Number.isFinite(msg.minutesUTC)) {
-    applyNightMask(depth, grid, sunFromMsg(msg), msg.altitude > 0);
-  }
+  renderShadows(H, grid, sunFromMsg(msg), cellMeters, rowScale, depth);
   current.depthValid = true;
-  const rgba = depthToRGBA(depth, w, h, null, style);
+  const rgba = depthToRGBA(depth, w, h, takeBuffer(w * h * 4), style);
   postMessage(
     { type: 'frame', id: current.id, requestId: msg.requestId, w, h, buffer: rgba.buffer, ms: performance.now() - t0 },
     [rgba.buffer],
@@ -242,14 +280,14 @@ function render(msg) {
 
 function exposure(msg) {
   if (!current) {
-    postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null });
+    postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null, reason: 'no-grid' });
     return;
   }
   const { grid, H, cellMeters, rowScale } = current;
   const gx = (msg.x - grid.originX) / grid.cellUnits;
   const gy = (msg.y - grid.originY) / grid.cellUnits;
   if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) {
-    postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null });
+    postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null, reason: 'outside' });
     return;
   }
   const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, msg.eyeHeight || 0, rowScale);
@@ -292,6 +330,9 @@ self.onmessage = (ev) => {
       break;
     case 'exposure':
       exposure(msg);
+      break;
+    case 'recycle':
+      if (msg.buffer instanceof ArrayBuffer && msg.buffer.byteLength > 0) spareBuffer = msg.buffer;
       break;
     default:
       break;

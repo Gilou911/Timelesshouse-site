@@ -152,11 +152,22 @@ await scenario('Paris : ombres de bâtiments, nuit, midi, ensoleillement d\'un p
   const op = await page.evaluate(() => window.__ombres.shadowMap.map.getPaintProperty('ombres-buildings-3d', 'fill-extrusion-opacity'));
   assert.equal(op, 0);
   await page.click('label:has(#toggle-buildings)');
-  // Bascule ombres.
+  // Bascule ombres : masquées, l'heure change, ré-affichées → l'image doit correspondre à la nouvelle heure.
   await page.click('label:has(#toggle-shadows)');
   const vis = await page.evaluate(() => window.__ombres.shadowMap.map.getLayoutProperty('ombres-overlay', 'visibility'));
   assert.equal(vis, 'none');
+  await page.evaluate((m) => {
+    const el = document.getElementById('time');
+    el.value = String(m);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, 23 * 60);
+  await page.waitForTimeout(300);
+  const framesHidden = await page.evaluate(() => window.__ombres.frames);
   await page.click('label:has(#toggle-shadows)');
+  await page.waitForFunction((n) => window.__ombres.frames > n, framesHidden, { timeout: 20000 });
+  await page.waitForTimeout(300);
+  const nightAgain = await overlayCoverage(page);
+  assert.ok(nightAgain.ratio > 0.99, `image fraîche après ré-affichage (nuit) : ${nightAgain.ratio}`);
   await context.close();
 });
 
@@ -269,6 +280,12 @@ await scenario('Heures de soleil : carte cumulée du jour, légende, URL', async
   assert.ok(colors > 8, `nuances de couleurs : ${colors}`);
   assert.ok(/m=exposure/.test(page.url()), page.url());
   await page.screenshot({ path: join(OUT, 'paris-exposure.png') });
+  // Ouverture directe d'un lien en mode heures de soleil : la carte doit se calculer sans intervention.
+  const { page: page2, context: ctx2 } = await openPage({ viewport: { width: 900, height: 650 }, hash: '#48.8566/2.3522/15.5?d=2026-11-09&t=15:30&m=exposure&o=0.7' });
+  await page2.waitForFunction(() => /Heures de soleil calculées/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  assert.ok(await page2.isVisible('#legend'), 'légende visible au démarrage en mode exposition');
+  assert.equal(await page2.evaluate(() => document.getElementById('opacity').value), '0.7', 'intensité lue dans l\'URL');
+  await ctx2.close();
   // Retour au mode ombres : une nouvelle image est rendue.
   const before = await page.evaluate(() => window.__ombres.frames);
   await page.click('label:has(input[name="mode"][value="shadows"])');

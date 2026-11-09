@@ -21,6 +21,10 @@ export function parseHash(hash) {
   if (q.has('ter')) out.terrain = q.get('ter') === '1';
   if (q.has('sh')) out.shadows = q.get('sh') === '1';
   if (q.get('m') === 'exposure') out.mode = 'exposure';
+  if (q.has('o')) {
+    const o = parseFloat(q.get('o'));
+    if (Number.isFinite(o)) out.opacity = Math.max(0.15, Math.min(0.85, o));
+  }
   if (q.get('p')) {
     const p = q.get('p').split(',').map(parseFloat);
     if (p.length === 2 && p.every(Number.isFinite) && Math.abs(p[0]) <= 85 && Math.abs(p[1]) <= 180) out.point = { lat: p[0], lng: p[1] };
@@ -41,6 +45,7 @@ export function buildHash(st) {
   if (st.terrain) q.set('ter', '1');
   if (st.shadows === false) q.set('sh', '0');
   if (st.mode === 'exposure') q.set('m', 'exposure');
+  if (Number.isFinite(st.opacity) && Math.abs(st.opacity - 0.45) > 1e-9) q.set('o', r(st.opacity, 2));
   if (st.point) q.set('p', `${r(st.point.lat, 5)},${r(st.point.lng, 5)}`);
   const qs = q.toString().replace(/%3A/g, ':').replace(/%2C/g, ',').replace(/%2F/g, '/');
   return `#${path}${qs ? '?' + qs : ''}`;

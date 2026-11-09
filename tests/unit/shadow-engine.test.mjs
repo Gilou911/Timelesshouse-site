@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sweepShadows, rasterizeBuildings, decodeTerrarium, DemMosaic, fillTerrain, depthToRGBA, pointExposure,
-  lngLatToMercator, mercatorToLngLat, metersPerUnit, rowScaleFactors, accumulateExposure, exposureToRGBA, exposureColor, applyNightMask, NIGHT,
+  lngLatToMercator, mercatorToLngLat, metersPerUnit, rowScaleFactors, accumulateExposure, exposureToRGBA, exposureColor, applyNightMask, renderShadows, NIGHT,
 } from '../../js/shadow-engine.js';
+import { sunPosition } from '../../js/sun.js';
 
 function grid(w, h) {
   return { w, h, H: new Float32Array(w * h), depth: new Float32Array(w * h) };
@@ -267,4 +268,38 @@ test('DemMosaic : les tuiles manquantes sont comblées à la hauteur moyenne des
   assert.equal(m.sample(2.5, 0.5), 200, 'tuile (1,0) comblée');
   assert.equal(m.sample(0.5, 2.5), 200, 'tuile (0,1) comblée');
   assert.equal(m.sample(0.5, 0.5), 100, 'tuile chargée intacte');
+});
+
+test('coucher de soleil : le nombre de cellules éclairées décroît sans éclair (seuils cohérents balayage/masque)', () => {
+  // Paris, 9 nov. 2026, coucher affiché 17:18 (16:18 UTC). Grille de 40 x 40 cellules de 10 m autour du centre.
+  const lat = 48.8566;
+  const lng = 2.3522;
+  const w = 40;
+  const h = 40;
+  const [cx, cy] = lngLatToMercator(lng, lat);
+  const cellUnits = 10 / metersPerUnit(lat);
+  const grid = { w, h, originX: cx - 20 * cellUnits, originY: cy - 20 * cellUnits, cellUnits };
+  const H = new Float32Array(w * h);
+  H[20 * w + 20] = 30; // une tour
+  const depth = new Float32Array(w * h);
+  let prevLit = Infinity;
+  let sawShadows = false;
+  let sawNight = false;
+  for (let m = 16 * 60; m <= 16 * 60 + 40; m++) {
+    const t = new Date(Date.UTC(2026, 10, 9, Math.floor(m / 60), m % 60));
+    const p = sunPosition(t, lat, lng);
+    const sun = { azimuth: p.azimuth, altitude: p.altitude, altitudeGeometric: p.altitudeGeometric, declination: p.declination, eqTime: p.equationOfTime, minutesUTC: m };
+    renderShadows(H, grid, sun, 10, null, depth);
+    let lit = 0;
+    let night = 0;
+    for (let i = 0; i < depth.length; i++) {
+      if (depth[i] === 0) lit++;
+      else if (depth[i] === NIGHT) night++;
+    }
+    if (lit < w * h && night === 0) sawShadows = true;
+    if (night === w * h) sawNight = true;
+    assert.ok(lit <= prevLit + 1, `${m} min : ${lit} cellules éclairées après ${prevLit} (éclair)`);
+    prevLit = lit;
+  }
+  assert.ok(sawShadows && sawNight, 'ombres longues puis nuit');
 });
