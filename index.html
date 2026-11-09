@@ -105,12 +105,15 @@
         <svg class="ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z" fill="currentColor"/></svg>
         <svg class="ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
       </button>
-      <input type="date" id="date" aria-label="Date">
+      <input type="date" id="date" min="1900-01-01" max="2100-12-31" aria-label="Date">
       <div class="clock">
         <span id="time-label" class="time-label">—</span>
         <span id="tz-label" class="tz-label">—</span>
       </div>
-      <button type="button" id="now" class="btn small">Maintenant</button>
+      <button type="button" id="now" class="btn small" aria-label="Maintenant" title="Revenir à la date et à l'heure actuelles">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Maintenant</span>
+      </button>
     </div>
     <div class="slider-row">
       <input type="range" id="time" min="0" max="1439" step="1" value="720" aria-label="Heure de la journée">

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHash, buildHash } from '../../js/state.js';
+import { parseHash, buildHash, isValidDateISO, isValidTime } from '../../js/state.js';
 
 test('aller-retour de l\'état dans le hash', () => {
   const st = { lat: 48.8566, lng: 2.3522, zoom: 15.5, bearing: -20, pitch: 45, date: '2026-11-09', time: '15:30', tz: 'Europe/Paris', style: 'satellite', buildings3d: true, terrain: false, shadows: true, point: { lat: 48.85, lng: 2.35 } };
@@ -41,4 +41,21 @@ test('hash invalide ou vide', () => {
   assert.equal(p.time, undefined);
   assert.equal(parseHash('#48.8/2.3/12?p=120,2.3').point, undefined, 'latitude du point hors bornes ignorée');
   assert.equal(parseHash('#48.8/2.3/12?p=48.8,200').point, undefined, 'longitude du point hors bornes ignorée');
+});
+
+test('date et heure du lien : seules les valeurs réelles sont acceptées', () => {
+  for (const d of ['2026-11-09', '2024-02-29', '1900-01-01', '2100-12-31']) assert.ok(isValidDateISO(d), d);
+  for (const d of ['2026-02-31', '2025-02-29', '2026-13-01', '2026-00-10', '2026-04-31', '1899-12-31', '2101-01-01', '0002-01-01', '9999-99-99', '2026-1-9', '', null, undefined]) {
+    assert.ok(!isValidDateISO(d), `refusée : ${d}`);
+  }
+  for (const t of ['00:00', '15:30', '23:59']) assert.ok(isValidTime(t), t);
+  for (const t of ['24:00', '12:60', '99:99', '7:05', '', null, undefined]) assert.ok(!isValidTime(t), `refusée : ${t}`);
+
+  const p = parseHash('#48.8/2.3/12?d=2026-02-31&t=99:99');
+  assert.equal(p.date, undefined, 'le 31 février est ignoré');
+  assert.equal(p.time, undefined, '99:99 est ignoré');
+  assert.equal(p.zoom, 12, 'le reste du lien est conservé');
+  const q = parseHash('#48.8/2.3/12?d=2024-02-29&t=23:59');
+  assert.equal(q.date, '2024-02-29');
+  assert.equal(q.time, '23:59');
 });

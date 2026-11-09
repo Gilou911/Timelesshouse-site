@@ -4,7 +4,7 @@ import { sunPosition, dayInfo, lightPhase, shadowLength } from './sun.js';
 import {
   browserTimeZone, isValidTimeZone, wallToUTC, minutesOfDay, tzLabel, formatMinutes, formatTime, formatDateISO, formatDuration,
 } from './tz.js';
-import { parseHash, buildHash } from './state.js';
+import { parseHash, buildHash, isValidDateISO } from './state.js';
 import { searchPlace } from './geocode.js';
 
 const $ = (id) => document.getElementById(id);
@@ -366,7 +366,7 @@ map.on('moveend', () => {
 shadowMap.on('heightfield', (stats) => {
   debug.stats = stats;
   if (stats.terrainUnsupported) {
-    setStatus('Ce navigateur est trop ancien pour le relief (OffscreenCanvas absent) : seules les ombres des bâtiments sont calculées.', true);
+    setStatus('Ce navigateur ne sait pas lire les tuiles de relief de façon fiable : seules les ombres des bâtiments sont calculées.', true);
     if (state.point) computeExposure();
     return;
   }
@@ -413,12 +413,16 @@ ui.time.addEventListener('input', () => {
   scheduleHash();
 });
 ui.date.addEventListener('change', () => {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(ui.date.value)) {
+  if (isValidDateISO(ui.date.value) && ui.date.value !== state.date) {
     state.date = ui.date.value;
     refreshAll();
     if (state.point) computeExposure();
     if (state.mode === 'exposure') requestExposureMap();
   }
+});
+// Saisie abandonnée sur une date vide ou hors bornes : le champ revient à la date réellement affichée.
+ui.date.addEventListener('blur', () => {
+  if (ui.date.value !== state.date) ui.date.value = state.date;
 });
 ui.now.addEventListener('click', () => {
   const now = new Date();

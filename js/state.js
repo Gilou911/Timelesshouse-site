@@ -1,4 +1,22 @@
 // État partageable dans l'URL : #lat/lng/zoom/bearing/pitch?d=YYYY-MM-DD&t=HH:MM&tz=…&style=…&b3d=1&ter=1
+/** Date civile réelle (pas de 31 février), entre 1900 et 2100 : domaine de validité du calcul solaire. */
+export function isValidDateISO(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (y < 1900 || y > 2100) return false;
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
+}
+
+/** Heure HH:MM entre 00:00 et 23:59. */
+export function isValidTime(s) {
+  const m = /^(\d{2}):(\d{2})$/.exec(s || '');
+  return !!m && Number(m[1]) <= 23 && Number(m[2]) <= 59;
+}
+
 export function parseHash(hash) {
   const s = (hash || '').replace(/^#/, '');
   if (!s) return {};
@@ -13,8 +31,8 @@ export function parseHash(hash) {
     if (Number.isFinite(parts[4])) out.pitch = Math.max(0, Math.min(85, parts[4]));
   }
   const q = new URLSearchParams(query);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(q.get('d') || '')) out.date = q.get('d');
-  if (/^\d{2}:\d{2}$/.test(q.get('t') || '')) out.time = q.get('t');
+  if (isValidDateISO(q.get('d'))) out.date = q.get('d');
+  if (isValidTime(q.get('t'))) out.time = q.get('t');
   if (q.get('tz')) out.tz = q.get('tz');
   if (q.get('style')) out.style = q.get('style');
   if (q.has('b3d')) out.buildings3d = q.get('b3d') === '1';
