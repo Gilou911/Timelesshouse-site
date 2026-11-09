@@ -473,9 +473,12 @@ ui.toggleTerrain.addEventListener('change', () => {
   shadowMap.setTerrain3d(state.terrain);
   scheduleHash();
 });
+let opacityTimer = null;
 ui.opacity.addEventListener('input', () => {
   state.opacity = Number(ui.opacity.value);
-  shadowMap.setOpacity(state.opacity);
+  // Un rendu complet par cran serait trop : on regroupe les changements rapprochés.
+  clearTimeout(opacityTimer);
+  opacityTimer = setTimeout(() => shadowMap.setOpacity(state.opacity), 60);
 });
 for (const r of document.querySelectorAll('input[name="mode"]')) {
   r.checked = r.value === state.mode;
