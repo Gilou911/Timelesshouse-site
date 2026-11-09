@@ -8,6 +8,7 @@ import {
 const TILE_SIZE = 256;
 const MAX_CACHE = 240; // ~60 Mo de hauteurs décodées au maximum
 const CONCURRENCY = 8;
+const FETCH_TIMEOUT_MS = 15000;
 
 let demTemplate = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const tileCache = new Map(); // "z/x/y" → Promise<Float32Array|null>
@@ -47,13 +48,22 @@ function fetchTile(z, x, y) {
   }
   const p = (async () => {
     const url = demTemplate.replace('{z}', z).replace('{x}', xw).replace('{y}', y);
-    try {
-      const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-      if (!res.ok) return null;
-      return await decodeBlob(await res.blob());
-    } catch {
-      return null;
+    // Deux tentatives, chacune bornée dans le temps : une requête qui ne répond jamais ne doit pas bloquer le calcul.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(url, { mode: 'cors', credentials: 'omit', signal: ctrl.signal });
+        if (res.status === 404) return null; // tuile inexistante : inutile d'insister
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await decodeBlob(await res.blob());
+      } catch {
+        // on réessaie une fois
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    return null;
   })();
   touchCache(key, p);
   p.then((v) => {
@@ -111,6 +121,7 @@ async function buildHeightfield(msg) {
     }
     await runPool(tasks, CONCURRENCY);
     if (token !== hfToken) return; // une demande plus récente a pris le relais
+    if (tilesMissing > 0) mosaic.fillUnfilled(); // comblées à la hauteur moyenne des tuiles chargées
     fillTerrain(T, grid, mosaic, demZoom);
   }
 
@@ -127,14 +138,32 @@ async function buildHeightfield(msg) {
     if (v > maxH) maxH = v;
   }
   const rowScale = Number.isFinite(latCenter) ? rowScaleFactors(grid, latCenter) : null;
-  current = { id, grid, H, T, depth: new Float32Array(w * h), cellMeters, rowScale };
+  current = { id, grid, H, T, depth: new Float32Array(w * h), depthValid: false, acc: null, accMaxMinutes: 0, cellMeters, rowScale };
   postMessage({
     type: 'heightfield-ready',
     id,
     stats: { tilesLoaded, tilesMissing, buildings: touched, minH, maxH, w, h },
   });
-  if (mode === 'exposure' && lastExposure) exposureMap({ ...lastExposure });
+  if (mode === 'exposure' && (msg.exposure || lastExposure)) exposureMap({ ...(msg.exposure || lastExposure) });
   else if (lastSun) render({ id, ...lastSun });
+}
+
+/** Recolore la dernière image sans recalcul (changement d'opacité). */
+function recolor() {
+  if (!current) return;
+  const { grid } = current;
+  const { w, h } = grid;
+  if (mode === 'exposure' && current.acc) {
+    const rgba = exposureToRGBA(current.acc, w, h, null, current.accMaxMinutes, style.exposureAlpha || 165);
+    postMessage({ type: 'frame', id: current.id, w, h, buffer: rgba.buffer, ms: 0, kind: 'exposure', maxMinutes: current.accMaxMinutes, maxAcc: current.accMax }, [rgba.buffer]);
+  } else if (mode === 'shadows' && current.depthValid) {
+    const rgba = depthToRGBA(current.depth, w, h, null, style);
+    postMessage({ type: 'frame', id: current.id, w, h, buffer: rgba.buffer, ms: 0 }, [rgba.buffer]);
+  } else if (mode === 'exposure' && lastExposure) {
+    exposureMap({ ...lastExposure });
+  } else if (lastSun) {
+    render({ ...lastSun });
+  }
 }
 
 /** Carte des heures de soleil : un balayage par échantillon, avec cession du fil entre deux pour rester réactif. */
@@ -152,7 +181,7 @@ async function exposureMap(msg) {
   const n = w * h;
   let k = 0;
   for (const s of msg.samples) {
-    if (token !== exposureToken || current.grid !== grid) {
+    if (token !== exposureToken || current.grid !== grid || mode !== 'exposure') {
       postMessage({ type: 'frame-skipped', requestId: msg.requestId });
       return;
     }
@@ -168,10 +197,16 @@ async function exposureMap(msg) {
       await new Promise((r) => setTimeout(r, 0));
     }
   }
-  if (token !== exposureToken || current.grid !== grid) return;
+  if (token !== exposureToken || current.grid !== grid || mode !== 'exposure') {
+    postMessage({ type: 'frame-skipped', requestId: msg.requestId });
+    return;
+  }
   let maxAcc = 0;
   for (let i = 0; i < n; i++) if (acc[i] > maxAcc) maxAcc = acc[i];
   const maxMinutes = msg.maxMinutes > 0 ? msg.maxMinutes : maxAcc;
+  current.acc = acc;
+  current.accMax = maxAcc;
+  current.accMaxMinutes = maxMinutes;
   const rgba = exposureToRGBA(acc, w, h, null, maxMinutes, style.exposureAlpha || 165);
   postMessage(
     { type: 'frame', id: current.id, requestId: msg.requestId, w, h, buffer: rgba.buffer, ms: performance.now() - t0, kind: 'exposure', maxMinutes, maxAcc },
@@ -197,6 +232,7 @@ function render(msg) {
   if (Number.isFinite(msg.declination) && Number.isFinite(msg.minutesUTC)) {
     applyNightMask(depth, grid, sunFromMsg(msg), msg.altitude > 0);
   }
+  current.depthValid = true;
   const rgba = depthToRGBA(depth, w, h, null, style);
   postMessage(
     { type: 'frame', id: current.id, requestId: msg.requestId, w, h, buffer: rgba.buffer, ms: performance.now() - t0 },
@@ -234,11 +270,11 @@ self.onmessage = (ev) => {
     case 'config':
       if (msg.demTemplate) demTemplate = msg.demTemplate;
       if (msg.style) style = { ...style, ...msg.style };
-      if (msg.mode) mode = msg.mode;
-      if (msg.style && current) {
-        if (mode === 'exposure' && lastExposure) exposureMap({ ...lastExposure });
-        else if (lastSun) render({ ...lastSun });
+      if (msg.mode && msg.mode !== mode) {
+        mode = msg.mode;
+        exposureToken++; // interrompt une carte des heures de soleil en cours
       }
+      if (msg.style && current) recolor();
       break;
     case 'exposure-map':
       exposureMap(msg).catch((err) => postMessage({ type: 'error', message: String(err) }));

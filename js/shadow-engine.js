@@ -69,6 +69,7 @@ export class DemMosaic {
     this.height = ny * tileSize;
     this.data = new Float32Array(this.width * this.height);
     this.filled = 0;
+    this.filledKeys = new Set();
   }
 
   setTile(tx, ty, heights) {
@@ -82,6 +83,48 @@ export class DemMosaic {
       this.data.set(heights.subarray(src, src + ts), dst);
     }
     this.filled++;
+    this.filledKeys.add(`${tx}/${ty}`);
+  }
+
+  /** Hauteur moyenne des tuiles chargées (échantillonnée), ou 0 si aucune. */
+  meanFilledHeight() {
+    if (this.filledKeys.size === 0) return 0;
+    const ts = this.tileSize;
+    let sum = 0;
+    let n = 0;
+    for (const key of this.filledKeys) {
+      const [tx, ty] = key.split('/').map(Number);
+      const ox = (tx - this.tx0) * ts;
+      const oy = (ty - this.ty0) * ts;
+      for (let y = 0; y < ts; y += 16) {
+        const row = (oy + y) * this.width + ox;
+        for (let x = 0; x < ts; x += 16) {
+          sum += this.data[row + x];
+          n++;
+        }
+      }
+    }
+    return n ? sum / n : 0;
+  }
+
+  /**
+   * Remplit les tuiles non chargées avec une hauteur constante (par défaut la moyenne des tuiles chargées) :
+   * un trou à 0 m au milieu d'un relief produirait de fausses ombres sur toute la tuile.
+   * @returns nombre de tuiles comblées
+   */
+  fillUnfilled(value = this.meanFilledHeight()) {
+    const ts = this.tileSize;
+    let n = 0;
+    for (let ty = this.ty0; ty < this.ty0 + this.ny; ty++) {
+      for (let tx = this.tx0; tx < this.tx0 + this.nx; tx++) {
+        if (this.filledKeys.has(`${tx}/${ty}`)) continue;
+        const ox = (tx - this.tx0) * ts;
+        const oy = (ty - this.ty0) * ts;
+        for (let y = 0; y < ts; y++) this.data.fill(value, (oy + y) * this.width + ox, (oy + y) * this.width + ox + ts);
+        n++;
+      }
+    }
+    return n;
   }
 
   /** Échantillon bilinéaire aux coordonnées pixel (px, py) ; les bords sont prolongés. */

@@ -118,6 +118,7 @@ const shadowMap = new ShadowMap('map', {
   opacity: state.opacity,
   mode: state.mode,
   cellBudget: isMobile() ? 600000 : 1200000,
+  exposureSamples: () => buildExposureSamples(),
 });
 const map = shadowMap.map;
 let marker = null;
@@ -196,24 +197,28 @@ function refreshDay() {
     const p = sunPosition(wallToUTC(state.tz, y, mo, d, h, 0), c.lat, c.lng);
     hourPositions.push({ label: `${h}h`, azimuth: p.azimuth, altitude: p.altitude });
   }
-  if (state.mode === 'exposure') requestExposureMap();
+  ui.legendMax.textContent = formatDuration(day.dayLengthMinutes);
+  ui.legendMid.textContent = formatDuration(day.dayLengthMinutes / 2);
 }
 
-/** Carte des heures de soleil : échantillons du jour (toutes les 20 min) au centre de la carte. */
-function requestExposureMap() {
+/** Échantillons du jour (toutes les 20 min) au centre de la carte, pour la carte des heures de soleil. */
+function buildExposureSamples() {
   const center = map.getCenter();
   const { y, mo, d } = dateParts();
-  const step = 20;
+  const stepMinutes = 20;
   const samples = [];
-  for (let m = 0; m < 1440; m += step) {
+  for (let m = 0; m < 1440; m += stepMinutes) {
     const t = wallToUTC(state.tz, y, mo, d, Math.floor(m / 60), m % 60);
     const p = sunPosition(t, center.lat, center.lng);
     samples.push({ azimuth: p.azimuth, altitude: p.altitude, ...sunExtras(t, p) });
   }
-  const maxMinutes = day ? day.dayLengthMinutes : 0;
-  shadowMap.requestExposureMap(samples, step, maxMinutes);
-  ui.legendMax.textContent = formatDuration(maxMinutes);
-  ui.legendMid.textContent = formatDuration(maxMinutes / 2);
+  return { samples, stepMinutes, maxMinutes: day ? day.dayLengthMinutes : 0 };
+}
+
+/** Demande explicite d'une carte des heures de soleil (changement de mode, de date ou de fuseau). */
+function requestExposureMap() {
+  const { samples, stepMinutes, maxMinutes } = buildExposureSamples();
+  shadowMap.requestExposureMap(samples, stepMinutes, maxMinutes);
   setStatus('Calcul des heures de soleil…');
 }
 
@@ -373,9 +378,6 @@ shadowMap.on('frame', (f) => {
   debug.frames++;
   if (f.kind === 'exposure') setStatus(`Heures de soleil calculées en ${(f.ms / 1000).toFixed(1).replace('.', ',')} s · max ${formatDuration(f.maxAcc)}`);
 });
-shadowMap.on('heightfield', () => {
-  if (state.mode === 'exposure') requestExposureMap();
-});
 shadowMap.on('error', (e) => setStatus(`Erreur de calcul : ${e.message || e}`, true));
 let mapErrorShown = 0;
 shadowMap.on('maperror', (err) => {
@@ -405,6 +407,7 @@ ui.date.addEventListener('change', () => {
     state.date = ui.date.value;
     refreshAll();
     if (state.point) computeExposure();
+    if (state.mode === 'exposure') requestExposureMap();
   }
 });
 ui.now.addEventListener('click', () => {
@@ -413,6 +416,7 @@ ui.now.addEventListener('click', () => {
   state.minutes = Math.floor(minutesOfDay(state.tz, now));
   refreshAll();
   if (state.point) computeExposure();
+  if (state.mode === 'exposure') requestExposureMap();
 });
 
 let playTimer = null;
@@ -636,5 +640,6 @@ tzReady.then(() => {
       state.minutes = Math.floor(minutesOfDay(state.tz, now));
     }
     refreshAll();
+    if (state.mode === 'exposure') requestExposureMap();
   }
 });

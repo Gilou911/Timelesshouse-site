@@ -145,7 +145,12 @@ export class ShadowMap {
     if (mode !== 'shadows' && mode !== 'exposure') return;
     this.options.mode = mode;
     this.worker.postMessage({ type: 'config', mode });
-    if (mode === 'shadows') this._requestRender();
+    if (mode === 'shadows') {
+      // Une carte des heures de soleil éventuellement en cours est interrompue côté worker : on libère le verrou.
+      this.frameInFlight = false;
+      clearTimeout(this._renderGuard);
+      this._requestRender();
+    }
   }
 
   /** Demande la carte des heures de soleil pour les échantillons donnés (azimut/élévation) du jour. */
@@ -413,6 +418,9 @@ export class ShadowMap {
     this.grids.set(id, grid);
     for (const k of this.grids.keys()) if (k < id - 2 && k !== this.currentGridId) this.grids.delete(k);
     this.emit('computing', { id, grid, demZoom, buildings: buildings.polyStart.length - 1 });
+    // En mode « heures de soleil », les échantillons du jour partent avec le relief : une seule carte par calcul.
+    const exposure = this.options.mode === 'exposure' && typeof this.options.exposureSamples === 'function' ? this.options.exposureSamples() : null;
+    if (exposure) this.lastExposureRequest = exposure;
     this.worker.postMessage(
       {
         type: 'heightfield',
@@ -424,6 +432,7 @@ export class ShadowMap {
         latCenter: center.lat,
         useTerrain: this.options.terrainShadows !== false,
         useBuildings: this.options.buildingShadows !== false,
+        exposure,
       },
       [buildings.coords.buffer, buildings.ringStart.buffer, buildings.polyStart.buffer, buildings.heights.buffer],
     );
@@ -547,7 +556,11 @@ export class ShadowMap {
       }
       this._flushTerrainCache();
       this.map.triggerRepaint();
-      this.map.once('render', () => src.pause());
+      // Le canvas est envoyé au GPU pendant le rendu (prepare, _playing = true). On coupe ensuite _playing sans
+      // passer par pause(), qui referait un second envoi identique (champ privé, version MapLibre épinglée).
+      this.map.once('render', () => {
+        src._playing = false;
+      });
     }
     this.emit('frame', { ms: msg.ms, w, h, kind: msg.kind || 'shadows', maxMinutes: msg.maxMinutes, maxAcc: msg.maxAcc });
     if (this.sunDirty) {

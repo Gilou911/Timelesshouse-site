@@ -255,3 +255,16 @@ test('balayage : chaque cellule est visitée pour tout azimut (plateau uniforme 
     assert.equal(missed, 0, `azimut ${az} : ${missed} cellules intérieures non visitées`);
   }
 });
+
+test('DemMosaic : les tuiles manquantes sont comblées à la hauteur moyenne des tuiles chargées', () => {
+  const m = new DemMosaic(0, 0, 2, 2, 2);
+  m.setTile(0, 0, new Float32Array([100, 100, 100, 100]));
+  m.setTile(1, 1, new Float32Array([300, 300, 300, 300]));
+  assert.equal(m.filled, 2);
+  assert.equal(m.meanFilledHeight(), 200);
+  const n = m.fillUnfilled();
+  assert.equal(n, 2);
+  assert.equal(m.sample(2.5, 0.5), 200, 'tuile (1,0) comblée');
+  assert.equal(m.sample(0.5, 2.5), 200, 'tuile (0,1) comblée');
+  assert.equal(m.sample(0.5, 0.5), 100, 'tuile chargée intacte');
+});
