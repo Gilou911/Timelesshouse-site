@@ -189,7 +189,7 @@ function refreshDay() {
     const gEvening = day.goldenEveningStart || day.solarNoon;
     bg = `linear-gradient(90deg, ${night} 0%, ${night} ${pct(day.civilDawn, 0)}, ${dawn} ${pct(day.sunrise, 0)}, ${dayc} ${pct(gMorning, 0)}, ${dayc} ${pct(gEvening, 1440)}, ${dawn} ${pct(day.sunset, 1440)}, ${night} ${pct(day.civilDusk, 1440)}, ${night} 100%)`;
   }
-  ui.time.style.background = bg;
+  ui.time.style.setProperty('--daylight', bg);
 
   // Positions horaires pour le tracé.
   hourPositions = [];

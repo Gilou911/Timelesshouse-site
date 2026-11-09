@@ -100,21 +100,21 @@
   </aside>
 
   <footer class="timebar" aria-label="Date et heure">
+    <div class="day-row">
+      <input type="date" id="date" aria-label="Date">
+      <button type="button" id="now" class="btn small">Maintenant</button>
+      <span id="tz-label" class="tz-label">—</span>
+    </div>
     <div class="time-row">
       <button type="button" id="play" class="icon-btn" aria-label="Lecture" title="Animer la journée (espace)">
         <svg class="ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z" fill="currentColor"/></svg>
         <svg class="ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
       </button>
-      <input type="date" id="date" aria-label="Date">
-      <div class="clock">
-        <span id="time-label" class="time-label">—</span>
-        <span id="tz-label" class="tz-label">—</span>
+      <div class="slider-row">
+        <input type="range" id="time" min="0" max="1439" step="1" value="720" aria-label="Heure de la journée">
+        <div class="ticks" aria-hidden="true"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>
       </div>
-      <button type="button" id="now" class="btn small">Maintenant</button>
-    </div>
-    <div class="slider-row">
-      <input type="range" id="time" min="0" max="1439" step="1" value="720" aria-label="Heure de la journée">
-      <div class="ticks" aria-hidden="true"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>
+      <span id="time-label" class="time-label">—</span>
     </div>
     <div class="status" id="status" aria-live="polite"></div>
   </footer>
