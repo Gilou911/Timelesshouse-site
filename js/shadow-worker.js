@@ -2,7 +2,7 @@
 // (relief + bâtiments) et calcule les ombres à la demande.
 import {
   DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, depthToRGBA, pointExposure, rowScaleFactors,
-  exposureToRGBA, renderShadows, sunIsUp, surfaceAt,
+  exposureToRGBA, renderShadows, sunIsUp, surfaceAt, horizonProfile, mercatorToLngLat, metersPerUnit,
 } from './shadow-engine.js';
 import { canDecodePNG, decodePNG, pngSize } from './png.js';
 
@@ -17,6 +17,12 @@ const TILE_SIZE = 256;
 const MAX_CACHE = 240; // ~60 Mo de hauteurs décodées au maximum
 const CONCURRENCY = 8;
 const FETCH_TIMEOUT_MS = 15000;
+// Horizon lointain d'un point mesuré : relief lu jusqu'à 20 km (au-delà, la courbure de la Terre efface presque tout),
+// sur des tuiles de zoom 11 (environ 55 m par pixel à 45° de latitude), au plus 36 tuiles, attendues 8 s au plus.
+const HORIZON_RADIUS = 20000;
+const HORIZON_ZOOM = 11;
+const HORIZON_MAX_TILES = 36;
+const HORIZON_WAIT_MS = 8000;
 
 let demTemplate = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 const tileCache = new Map(); // "z/x/y" → Promise<Float32Array|null>
@@ -216,7 +222,10 @@ async function buildHeightfield(msg) {
     if (v > maxH) maxH = v;
   }
   const rowScale = Number.isFinite(latCenter) ? rowScaleFactors(grid, latCenter) : null;
-  current = { id, grid, H, T, canopy, depth: new Float32Array(w * h), depthValid: false, acc: null, accMaxMinutes: 0, cellMeters, rowScale };
+  current = {
+    id, grid, H, T, canopy, depth: new Float32Array(w * h), depthValid: false, acc: null, accMaxMinutes: 0, cellMeters, rowScale,
+    demZoom: tilesLoaded > 0 ? demZoom : null, // null : pas de relief, donc pas d'horizon lointain non plus
+  };
   postMessage({
     type: 'heightfield-ready',
     id,
@@ -343,12 +352,75 @@ function render(msg) {
   );
 }
 
-function exposure(msg) {
-  if (!current) {
+/**
+ * Horizon lointain du point (gx, gy) de la grille courante, au-delà du bord de la grille et jusqu'à 20 km : la grille
+ * ne couvre que la vue, or en montagne le soleil bas d'hiver est caché par des sommets à plusieurs kilomètres.
+ * `eye` : hauteur de l'œil au-dessus du relief (m). Rend { profile, complete } ou null (grille assez grande, pas de relief).
+ */
+async function farHorizon(cur, gx, gy, eye) {
+  const { grid, cellMeters, rowScale, demZoom } = cur;
+  if (demZoom == null) return null;
+  const cellM = cellMeters * (rowScale ? rowScale[Math.min(grid.h - 1, Math.floor(gy))] : 1);
+  // Distance (m) du point au bord de la grille dans chaque direction : en deçà, la grille fine a déjà tout vu.
+  const start = new Float32Array(360);
+  let nearest = Infinity;
+  for (let a = 0; a < 360; a++) {
+    const sx = Math.sin((a * Math.PI) / 180);
+    const sy = -Math.cos((a * Math.PI) / 180);
+    const tx = sx > 1e-9 ? (grid.w - gx) / sx : sx < -1e-9 ? -gx / sx : Infinity;
+    const ty = sy > 1e-9 ? (grid.h - gy) / sy : sy < -1e-9 ? -gy / sy : Infinity;
+    start[a] = Math.min(tx, ty) * cellM;
+    nearest = Math.min(nearest, start[a]);
+  }
+  if (nearest >= HORIZON_RADIUS) return null;
+
+  const mx = grid.originX + gx * grid.cellUnits;
+  const my = grid.originY + gy * grid.cellUnits;
+  const mpu = metersPerUnit(mercatorToLngLat(mx, my)[1]);
+  const r = HORIZON_RADIUS / mpu;
+  let z = Math.min(HORIZON_ZOOM, demZoom);
+  let tx0;
+  let tx1;
+  let ty0;
+  let ty1;
+  for (;;) {
+    const n = 2 ** z;
+    tx0 = Math.floor((mx - r) * n);
+    tx1 = Math.floor((mx + r) * n);
+    ty0 = Math.max(0, Math.floor((my - r) * n));
+    ty1 = Math.min(n - 1, Math.floor((my + r) * n));
+    if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) <= HORIZON_MAX_TILES || z === 0) break;
+    z--; // près des pôles, les tuiles rétrécissent : un zoom de moins
+  }
+  const mosaic = new DemMosaic(tx0, ty0, tx1 - tx0 + 1, ty1 - ty0 + 1, TILE_SIZE);
+  const tasks = [];
+  for (let ty = ty0; ty <= ty1; ty++) {
+    for (let tx = tx0; tx <= tx1; tx++) {
+      tasks.push(async () => {
+        const heights = await fetchTile(z, tx, ty);
+        if (heights) mosaic.setTile(tx, ty, heights);
+      });
+    }
+  }
+  // Une tuile qui tarde ne bloque pas la mesure : on calcule avec celles qui sont là (les autres comptent pour 0 m).
+  let timer;
+  await Promise.race([runPool(tasks, CONCURRENCY), new Promise((r2) => { timer = setTimeout(r2, HORIZON_WAIT_MS); })]);
+  clearTimeout(timer);
+  const scale = TILE_SIZE * 2 ** z;
+  const elevAt = (east, north) => mosaic.sample((mx + east / mpu) * scale - tx0 * TILE_SIZE, (my - north / mpu) * scale - ty0 * TILE_SIZE);
+  if (!mosaic.filledKeys.has(`${Math.floor(mx * 2 ** z)}/${Math.floor(my * 2 ** z)}`)) return null; // sans la tuile du point, pas d'œil
+  const px = mpu / scale; // mètres par pixel de ces tuiles
+  for (let a = 0; a < 360; a++) start[a] = Math.max(start[a], 2 * px);
+  return { profile: horizonProfile(elevAt, elevAt(0, 0) + eye, start, HORIZON_RADIUS, px), complete: mosaic.filled === tasks.length };
+}
+
+async function exposure(msg) {
+  const cur = current;
+  if (!cur) {
     postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null, reason: 'no-grid' });
     return;
   }
-  const { grid, H, cellMeters, rowScale } = current;
+  const { grid, H, T, canopy, cellMeters, rowScale } = cur;
   const gx = (msg.x - grid.originX) / grid.cellUnits;
   const gy = (msg.y - grid.originY) / grid.cellUnits;
   if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) {
@@ -356,15 +428,26 @@ function exposure(msg) {
     return;
   }
   const i = Math.floor(gy) * grid.w + Math.floor(gx);
-  const base = surfaceAt(H, current.T, current.canopy, i);
-  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, msg.eyeHeight || 0, rowScale, { base });
+  const base = surfaceAt(H, T, canopy, i);
+  const eye = msg.eyeHeight || 0;
+  // La mesure du jour et celle de l'année portent sur le même point : l'horizon complet sert aux deux.
+  const key = `${gx},${gy},${eye}`;
+  const far = cur.far && cur.far.key === key ? cur.far.value : await farHorizon(cur, gx, gy, base - T[i] + eye);
+  if (!far || far.complete) cur.far = { key, value: far };
+  if (current !== cur) {
+    // Champ de hauteurs remplacé pendant la lecture de l'horizon : la page redemande la mesure sur le nouveau.
+    postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null, reason: 'stale' });
+    return;
+  }
+  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, eye, rowScale, { base, horizon: far && far.profile });
   postMessage({
     type: 'exposure-result',
     requestId: msg.requestId,
     lit,
-    elevation: current.T[i],
+    elevation: T[i],
     surface: base,
-    underTrees: !!(current.canopy && current.canopy[i]),
+    underTrees: !!(canopy && canopy[i]),
+    horizon: far ? (far.complete ? 'complete' : 'partial') : 'none',
   });
 }
 
@@ -395,7 +478,7 @@ self.onmessage = (ev) => {
       }
       break;
     case 'exposure':
-      exposure(msg);
+      exposure(msg).catch((err) => postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null, reason: String(err) }));
       break;
     case 'recycle':
       if (msg.buffer instanceof ArrayBuffer && msg.buffer.byteLength > 0) spareBuffer = msg.buffer;

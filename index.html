@@ -107,6 +107,18 @@
           <ul id="facade-list" class="exposure-list"></ul>
           <div class="exposure-bar" id="facade-bar" aria-hidden="true"></div>
         </div>
+        <label class="switch"><span>Sur l'année</span><input type="checkbox" role="switch" id="year-on"></label>
+        <div id="year" class="year" hidden>
+          <div class="exposure-total"><span id="year-hours">—</span><small id="year-label">de soleil direct sur l'année</small></div>
+          <div class="year-plot">
+            <div class="year-months" aria-hidden="true"><span>J</span><span>F</span><span>M</span><span>A</span><span>M</span><span>J</span><span>J</span><span>A</span><span>S</span><span>O</span><span>N</span><span>D</span></div>
+            <canvas id="year-chart" class="year-chart" role="img" aria-label="Heures de soleil direct par mois"></canvas>
+            <div class="ticks" aria-hidden="true"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>
+          </div>
+          <p class="hint year-legend"><span><i class="swatch sun" aria-hidden="true"></i>Soleil</span><span><i class="swatch shade" aria-hidden="true"></i>Ombre</span><span><i class="swatch night" aria-hidden="true"></i>Nuit</span></p>
+          <p class="hint" id="year-months"></p>
+          <p class="fineprint" id="year-note"></p>
+        </div>
       </div>
     </section>
 

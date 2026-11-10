@@ -727,12 +727,13 @@ export class ShadowMap {
       const requestId = ++this.requestId;
       this.pendingExposure.set(requestId, resolve);
       this.worker.postMessage({ type: 'exposure', requestId, x, y, samples, eyeHeight });
+      // Le premier point d'un lieu attend aussi les tuiles de l'horizon lointain (8 s au plus côté worker).
       setTimeout(() => {
         if (this.pendingExposure.has(requestId)) {
           this.pendingExposure.delete(requestId);
           resolve({ lit: null });
         }
-      }, 4000);
+      }, 20000);
     });
   }
 

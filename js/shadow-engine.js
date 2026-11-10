@@ -393,13 +393,15 @@ export function depthToRGBA(depth, w, h, out, style) {
  * Ensoleillement d'un point de la grille pour une liste d'instants.
  * samples = [{ azimuth, altitude }, …] ; retourne Uint8Array (1 = éclairé, 0 = à l'ombre / nuit).
  * @param {number} eyeHeight hauteur (m) au-dessus de la surface locale (ex. 1,5 m pour une personne)
- * @param {object} [opts] { base } : surface (m) sous le point si ce n'est pas H (un point dans un bois est au sol)
+ * @param {object} [opts] { base } : surface (m) sous le point si ce n'est pas H (un point dans un bois est au sol) ;
+ *   { horizon } : horizon lointain au-delà de la grille (voir horizonProfile), le soleil doit passer au-dessus
  */
 export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 0, rowScale = null, opts = {}) {
   const out = new Uint8Array(samples.length);
   const ix0 = Math.min(w - 1, Math.max(0, Math.floor(gx)));
   const iy0 = Math.min(h - 1, Math.max(0, Math.floor(gy)));
   const z0 = (opts.base ?? H[iy0 * w + ix0]) + eyeHeight;
+  const hz = opts.horizon;
   if (rowScale) cellMeters *= rowScale[iy0];
   let maxH = -Infinity;
   for (let i = 0; i < H.length; i++) if (H[i] > maxH) maxH = H[i];
@@ -408,6 +410,15 @@ export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 
     if (altitude <= 0) {
       out[s] = 0;
       continue;
+    }
+    if (hz) {
+      const f = ((((azimuth % 360) + 360) % 360) * hz.length) / 360;
+      const a0 = Math.floor(f) % hz.length;
+      const a1 = (a0 + 1) % hz.length;
+      if (altitude <= hz[a0] + (hz[a1] - hz[a0]) * (f - Math.floor(f))) {
+        out[s] = 0;
+        continue;
+      }
     }
     const az = azimuth * RAD;
     const dx = Math.sin(az);
@@ -436,6 +447,31 @@ export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 
       dist += stepMeters;
     }
     out[s] = lit;
+  }
+  return out;
+}
+
+// Courbure de la Terre vue à travers l'atmosphère (coefficient de réfraction 0,13) : un relief à d mètres paraît
+// plus bas de d² × CURVATURE.
+const CURVATURE = (1 - 0.13) / (2 * EARTH_RADIUS);
+
+/**
+ * Horizon lointain d'un point : pour chacun des n azimuts (0 = nord, sens horaire), la plus grande élévation apparente
+ * (degrés) du relief entre start[a] et `radius` mètres, par pas de `step` mètres. `elevAt(est, nord)` lit le relief
+ * (m) à ce décalage en mètres ; z0 est l'altitude de l'œil. -90 là où rien n'est lu.
+ */
+export function horizonProfile(elevAt, z0, start, radius, step, n = 360) {
+  const out = new Float32Array(n).fill(-90);
+  for (let a = 0; a < n; a++) {
+    const az = (a * 360 * RAD) / n;
+    const ex = Math.sin(az);
+    const ny = Math.cos(az);
+    let best = -Infinity;
+    for (let d = Math.max(step, start[a]); d <= radius; d += step) {
+      const t = (elevAt(d * ex, d * ny) - d * d * CURVATURE - z0) / d;
+      if (t > best) best = t;
+    }
+    if (best > -Infinity) out[a] = Math.atan(best) / RAD;
   }
   return out;
 }

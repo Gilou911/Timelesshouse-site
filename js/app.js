@@ -8,6 +8,7 @@ import { parseHash, buildHash, isValidDateISO, isValidTime, parsePlaces, addPlac
 import { searchPlace } from './geocode.js';
 import { nearestWall, offsetLngLat, facadeLit, litIntervals } from './facade.js';
 import { moonPosition, moonTimes, moonPhase } from './moon.js';
+import { yearSamples, yearTotals, drawYearChart } from './year.js';
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -28,6 +29,8 @@ const ui = {
   placesHint: $('places-hint'), placeForm: $('place-form'), placeName: $('place-name'), placeError: $('place-error'), places: $('places'),
   moonPhase: $('moon-phase'), moonrise: $('moonrise'), moonset: $('moonset'), moonLit: $('moon-lit'), moonPos: $('moon-pos'),
   pointHeight: $('point-height'),
+  yearOn: $('year-on'), year: $('year'), yearHours: $('year-hours'), yearLabel: $('year-label'), yearChart: $('year-chart'),
+  yearMonths: $('year-months'), yearNote: $('year-note'),
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -409,6 +412,7 @@ async function computeExposure() {
         : '<li>Calcul du relief en cours…</li>';
     ui.exposureBar.innerHTML = '';
     ui.exposureMeta.textContent = '';
+    resetYear();
     return;
   }
   lastLit = { lit: res.lit, azimuths: samples.map((s) => s.azimuth), step };
@@ -417,8 +421,78 @@ async function computeExposure() {
   const alt = res.elevation != null ? `altitude ${Math.round(res.elevation)} m` : '';
   const roof = res.surface != null && res.elevation != null && res.surface - res.elevation > 1 ? ` · sur un toit (${Math.round(res.surface - res.elevation)} m)` : '';
   const trees = res.underTrees ? ' · sous les arbres' : '';
-  ui.exposureMeta.textContent = `${alt}${roof}${trees} · mesuré à ${fmtMeters(state.height)} m ${roof ? 'au-dessus du toit' : 'du sol'}`;
+  const far = res.horizon === 'partial' ? ' · relief lointain incomplet' : '';
+  ui.exposureMeta.textContent = `${alt}${roof}${trees} · mesuré à ${fmtMeters(state.height)} m ${roof ? 'au-dessus du toit' : 'du sol'}${far}`;
+  refreshYear();
 }
+
+// ---------- Ensoleillement sur l'année ----------
+const MONTHS = Array.from({ length: 12 }, (_, i) => new Intl.DateTimeFormat('fr-FR', { month: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(2026, i, 1))));
+const HORIZON_NOTE = {
+  complete: 'Relief compté jusqu\'à 20 km autour du point ; bâtiments et arbres dans la zone calculée seulement.',
+  partial: 'Relief lointain incomplet (des tuiles de relief n\'ont pas répondu) ; bâtiments et arbres dans la zone calculée seulement.',
+  none: 'Relief, bâtiments et arbres de la zone calculée.',
+};
+let heightfieldSeq = 0; // un nouveau champ de hauteurs (vue déplacée, arbres) rend l'année périmée
+let yearKey = '';
+let yearData = null;
+let yearSeq = 0;
+
+/** Calcule l'année du point si elle a changé (point, hauteur, année, fuseau, champ de hauteurs), sinon la redessine. */
+async function refreshYear() {
+  ui.year.hidden = !ui.yearOn.checked;
+  if (ui.year.hidden || !state.point) return;
+  const { y } = dateParts();
+  const key = [state.point.lat, state.point.lng, state.height, y, state.tz, heightfieldSeq].join();
+  if (key === yearKey) return drawYear();
+  yearKey = key;
+  const seq = ++yearSeq;
+  ui.yearHours.textContent = '…';
+  const data = yearSamples(state.tz, y, state.point.lat, state.point.lng);
+  const res = await shadowMap.exposureAt(state.point, data.samples, state.height);
+  if (seq !== yearSeq) return;
+  if (!res || !res.lit) {
+    yearKey = ''; // la prochaine mesure du point relancera l'année
+    return;
+  }
+  data.samples = null;
+  yearData = { year: y, data, lit: res.lit, horizon: res.horizon };
+  drawYear();
+}
+
+/** Point hors de la zone calculée, relief pas encore prêt : l'année d'un autre point ne reste pas affichée. */
+function resetYear() {
+  yearKey = '';
+  yearData = null;
+  ui.yearHours.textContent = '…';
+  ui.yearMonths.textContent = '';
+  ui.yearNote.textContent = '';
+  ui.yearChart.getContext('2d').clearRect(0, 0, ui.yearChart.width, ui.yearChart.height);
+}
+
+function drawYear() {
+  if (!yearData || ui.year.hidden) return;
+  const { year, data, lit, horizon } = yearData;
+  const { months, total } = yearTotals(lit, year, data.perDay, data.step);
+  const h = (min) => `${Math.round(min / 60).toLocaleString('fr-FR')} h`;
+  ui.yearHours.textContent = h(total);
+  ui.yearLabel.textContent = `de soleil direct en ${year}`;
+  const most = months.indexOf(Math.max(...months));
+  const least = months.indexOf(Math.min(...months));
+  ui.yearMonths.textContent = total ? `Le plus en ${MONTHS[most]} (${h(months[most])}), le moins en ${MONTHS[least]} (${h(months[least])}).` : 'Aucun soleil direct de toute l\'année.';
+  ui.yearNote.textContent = HORIZON_NOTE[horizon] || HORIZON_NOTE.none;
+  ui.yearChart.setAttribute('aria-label', `Heures de soleil direct par mois : ${months.map((m, i) => `${MONTHS[i]} ${h(m)}`).join(', ')}`);
+  const { y, mo, d } = dateParts();
+  drawYearChart(ui.yearChart, data, lit, y === year ? Math.round((Date.UTC(y, mo - 1, d) - Date.UTC(y, 0, 1)) / 86400000) : -1);
+}
+ui.yearOn.addEventListener('change', refreshYear);
+// Le graphique suit le thème de l'appareil et la largeur du panneau.
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawYear);
+let yearResize = 0;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(yearResize);
+  yearResize = requestAnimationFrame(drawYear);
+});
 
 // Hauteur du point : virgule ou point décimal, ramenée entre 0 et 500 m ; une saisie illisible reprend la valeur d'avant.
 ui.pointHeight.addEventListener('change', () => {
@@ -530,6 +604,7 @@ map.on('moveend', () => {
 });
 shadowMap.on('heightfield', (stats) => {
   debug.stats = stats;
+  heightfieldSeq++;
   if (stats.terrainUnsupported) {
     setStatus('Ce navigateur ne sait pas lire les tuiles de relief de façon fiable : seules les ombres des bâtiments sont calculées.', true);
     if (state.point) computeExposure();
@@ -543,7 +618,7 @@ shadowMap.on('heightfield', (stats) => {
   const parts = [];
   parts.push(`relief ${stats.tilesLoaded} tuile${stats.tilesLoaded > 1 ? 's' : ''}${stats.tilesMissing ? ` (${stats.tilesMissing} manquante${stats.tilesMissing > 1 ? 's' : ''})` : ''}`);
   parts.push(`${stats.buildings.toLocaleString('fr-FR')} bâtiment${stats.buildings > 1 ? 's' : ''}`);
-  if (stats.wooded > 0) parts.push(`bois sur ${Math.max(1, Math.round(stats.wooded * 100))} %`);
+  if (stats.wooded > 0) parts.push(`bois\u00a0${Math.max(1, Math.round(stats.wooded * 100))}\u00a0%`); // insécable : jamais un « % » seul à la ligne
   setStatus(parts.join(' · '));
   if (state.point) computeExposure();
 });

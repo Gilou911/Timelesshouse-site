@@ -10,6 +10,9 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 - Panneau soleil : azimut, élévation, lever, coucher, midi solaire, durée du jour, heures dorée, rose et bleue, longueur d'ombre.
 - Mode « Heures de soleil » : carte colorée du nombre d'heures de soleil direct reçues en chaque point sur la journée.
 - Clic sur la carte : heures de soleil direct reçues par ce point ce jour-là, avec les créneaux.
+- **Sur l'année** : les heures de soleil du point jour par jour sur douze mois, en graphique jours × heures (une ligne par
+  jour, l'heure en abscisse comme la frise ; soleil, ombre, nuit), avec le total, le mois le plus et le moins ensoleillé.
+  Les mesures d'un point comptent le relief jusqu'à 20 km, même hors de la vue.
 - Course du soleil tracée autour du point (graduations horaires, direction du soleil et de l'ombre).
 - Repérage de tournage :
   - **Cérémonie** : date et heure d'un événement ; la barre du temps passe d'un geste du jour de la cérémonie à celui du
@@ -122,7 +125,7 @@ Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
 ```bash
 npm install          # dépendances de développement uniquement (MapLibre, tz-lookup pour vendor/)
 npm test             # tests unitaires : soleil (référence NREL SPA), lune (référence astronomy-engine), bandes de lumière,
-                     # façades, moteur d'ombres, fuseaux, URL, carnet de lieux
+                     # façades, moteur d'ombres, arbres, horizon lointain, année, fuseaux, URL, carnet de lieux
 npm run serve        # http://localhost:8787 — fond de carte factice (style OpenFreeMap réel, tuiles de test) et vrai relief
 npm run test:e2e     # Chromium + Playwright : rendu réel, captures dans tests/e2e/out/
                      # (Playwright n'est pas dans package.json : npm install -D playwright && npx playwright install chromium ;
@@ -166,7 +169,12 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    cellules, donc un rendu en quelques dizaines de millisecondes même en 1 000 × 1 000.
 4. **Heures de soleil** : même balayage répété toutes les 20 minutes de la journée, en cumulant les minutes éclairées
    par cellule (environ une seconde sur un ordinateur portable).
-5. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
+5. **Un point mesuré** : un rayon par instant, du point vers le soleil, à travers la grille (relief, bâtiments, bois). Au-delà
+   du bord de la grille, un **horizon lointain** prend le relais : sur des tuiles de relief de zoom 11 (environ 55 m),
+   l'élévation apparente du relief jusqu'à 20 km est relevée dans 360 directions, courbure de la Terre comprise ; le soleil
+   doit passer au-dessus. Le jour : un instant toutes les 5 minutes. L'année : toutes les 10 minutes, 365 jours, à l'heure
+   civile (changements d'heure compris), soit 52 560 instants calculés en quelques dizaines de millisecondes.
+6. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
    Le relief et les bâtiments 3D sont des couches MapLibre classiques.
 
 ## Sources de données et crédits
@@ -188,6 +196,9 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - Les bâtiments n'existent dans les tuiles qu'à partir du zoom 13 ; en dessous, seules les ombres du relief sont calculées.
 - La hauteur des bâtiments vient d'OpenStreetMap : souvent estimée (niveaux × 3 m), parfois absente (6 m par défaut).
 - Le relief a une résolution de 30 m environ (mieux en Europe) : les ombres fines des petits reliefs sont lissées.
+- Sur la carte, seuls le relief, les bâtiments et les bois de la zone calculée (la vue et 30 % autour) portent ombre : en
+  montagne, l'ombre d'un sommet hors de la vue manque. Les mesures d'un point (jour, année, façade) comptent en plus le
+  relief jusqu'à 20 km, à 55 m près ; les bâtiments et les arbres plus lointains n'y entrent pas.
 - Les ombres des bâtiments situés juste hors de la zone chargée peuvent manquer en bord de carte.
 - Arbres : seuls les bois et forêts d'OpenStreetMap comptent, tous à 15 m de haut et feuillus toute l'année. Les arbres
   isolés et les alignements de rues n'y sont pas : il faudrait une autre source (Overpass), donc une nouvelle origine

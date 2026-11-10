@@ -622,7 +622,7 @@ await scenario('Point 3 : arbres', async () => {
   const { page, context } = await openPage({ viewport: { width: 1280, height: 800 }, hash: '#48.8566/2.36175/16?d=2026-11-10&t=15:00' });
   const { stats } = await waitForFrame(page, 1);
   assert.ok(stats.wooded > 0.01, `bois rasterisé : ${JSON.stringify(stats)}`);
-  assert.match(await page.textContent('#status'), /bois sur \d+ %/);
+  assert.match(await page.textContent('#status'), /bois\u00a0\d+\u00a0%/);
   await page.waitForTimeout(400);
   const withTrees = await overlayCoverage(page);
   // Un point au milieu du bois est mesuré au sol, sous les arbres.
@@ -639,6 +639,29 @@ await scenario('Point 3 : arbres', async () => {
   assert.ok(withTrees.ratio > without.ratio + 0.005, `ombre des arbres : ${withTrees.ratio.toFixed(4)} avec, ${without.ratio.toFixed(4)} sans`);
   await page.waitForFunction(() => !/sous les arbres/.test(document.getElementById('exposure-meta').textContent) && /mesuré à/.test(document.getElementById('exposure-meta').textContent), null, { timeout: 15000 });
   await page.waitForFunction(() => /[?&]arb=0/.test(location.hash), null, { timeout: 5000 });
+
+  // Sur l'année, sans les arbres : des heures de soleil, un graphique jours × heures, le relief lointain lu.
+  const yearTotal = () => page.evaluate(() => Number(document.getElementById('year-hours').textContent.replace(/\D/g, '')));
+  await page.click('label:has(#year-on)');
+  await page.waitForFunction(() => /^[\d\u202f\u00a0 ]+ h$/.test(document.getElementById('year-hours').textContent), null, { timeout: 40000 });
+  const open = await yearTotal();
+  assert.ok(open > 1000 && open < 4400, `soleil sur l'année en terrain découvert : ${open} h`);
+  const chart = await page.evaluate(() => {
+    const c = document.getElementById('year-chart');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let sun = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] > 150 && d[i + 2] < 90 && d[i + 3] > 200) sun++;
+    return { sun, total: d.length / 4, w: c.width, label: c.getAttribute('aria-label') };
+  });
+  assert.ok(chart.sun > chart.total * 0.2 && chart.w > 200, `graphique : ${JSON.stringify({ ...chart, label: undefined })}`);
+  assert.match(chart.label, /janvier \d+ h.*décembre \d+ h/);
+  assert.match(await page.textContent('#year-months'), /^Le plus en (mai|juin|juillet|août) \(/);
+  assert.match(await page.textContent('#year-note'), /20 km/);
+  await page.screenshot({ path: join(OUT, 'annee.png') });
+  // Avec les arbres, le point est sous le bois : plus aucun soleil direct de l'année.
+  await page.click('label:has(#toggle-trees)');
+  await page.waitForFunction(() => document.getElementById('year-months').textContent.startsWith('Aucun soleil'), null, { timeout: 40000 });
+  assert.equal(await yearTotal(), 0);
   await context.close();
 });
 

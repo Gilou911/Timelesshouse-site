@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   sweepShadows, rasterizeBuildings, decodeTerrarium, DemMosaic, fillTerrain, depthToRGBA, pointExposure,
   lngLatToMercator, mercatorToLngLat, metersPerUnit, rowScaleFactors, accumulateExposure, exposureToRGBA, exposureColor, applyNightMask, renderShadows, NIGHT,
-  surfaceAt,
+  surfaceAt, horizonProfile,
 } from '../../js/shadow-engine.js';
 import { sunPosition } from '../../js/sun.js';
 
@@ -399,4 +399,28 @@ test('bois : canopée sur le sol nu seulement, ombre au-delà de la lisière, po
   assert.deepEqual(Array.from(pointExposure(H, w, h, 20.5, 30.5, samples, 1, 20, null, opts)), [1, 1], 'drone à 20 m');
   assert.deepEqual(Array.from(pointExposure(H, w, h, 20.5, 30.5, samples, 1, 1.5)), [1, 1], 'sans base : posé sur la canopée');
   assert.deepEqual(Array.from(pointExposure(H, w, h, 20.5, 45.5, samples, 1, 1.5)), [1, 1], 'en terrain découvert au sud');
+});
+
+test('horizon lointain : une crête à 5 km au sud cache le soleil bas, pas le soleil haut', () => {
+  // Crête de 1 000 m entre 4,9 et 5,1 km au sud ; plat ailleurs.
+  const elevAt = (east, north) => (north <= -4900 && north > -5100 && Math.abs(east) < 3000 ? 1000 : 0);
+  const profile = horizonProfile(elevAt, 0, new Float32Array(360), 20000, 50);
+  const expected = (Math.atan(1000 / 4900) * 180) / Math.PI;
+  assert.ok(Math.abs(profile[180] - expected) < 0.05, `plein sud : ${profile[180]} au lieu de ${expected}`);
+  assert.ok(Math.abs(profile[0]) < 0.01, `plein nord, plat : ${profile[0]}`);
+  assert.ok(profile[90] <= 0, 'à l\'est, rien');
+  // Courbure : un sommet de 100 m à 20 km paraît 23 m plus bas (coefficient de réfraction 0,13).
+  const far = horizonProfile((e, n) => (n > 19900 ? 100 : -1e4), 0, new Float32Array(360), 20000, 50);
+  assert.ok(Math.abs(far[0] - (Math.atan((100 - 20000 ** 2 * 0.87 / (2 * 6378137)) / 20000) * 180) / Math.PI) < 0.01, `courbure : ${far[0]}`);
+  // Départ au bord de la grille : ce qui est en deçà n'est pas relu.
+  const start = new Float32Array(360).fill(6000);
+  assert.ok(horizonProfile(elevAt, 0, start, 20000, 50)[180] < 0.01, 'la crête est en deçà du départ');
+
+  // Le point ne voit le soleil que s'il passe au-dessus de l'horizon lointain.
+  const w = 10;
+  const h = 10;
+  const H = new Float32Array(w * h);
+  const samples = [{ azimuth: 180, altitude: 10 }, { azimuth: 180, altitude: 13 }, { azimuth: 90, altitude: 5 }, { azimuth: 179.5, altitude: 11 }];
+  assert.deepEqual(Array.from(pointExposure(H, w, h, 5, 5, samples, 1, 1.5, null, { horizon: profile })), [0, 1, 1, 0]);
+  assert.deepEqual(Array.from(pointExposure(H, w, h, 5, 5, samples, 1, 1.5)), [1, 1, 1, 1], 'sans horizon : tout est éclairé');
 });

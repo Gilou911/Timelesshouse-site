@@ -277,7 +277,18 @@ body {
 .range-label output { color: var(--text); font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
 /* Façade : sous le point, un second résultat plus discret que le premier. */
 .facade .hint { margin: 2px 0 12px; }
-.facade .exposure-total span { font-size: 1.75rem; }
+.facade .exposure-total span, .year .exposure-total span { font-size: 1.75rem; }
+/* Sur l'année : une ligne par jour, janvier en haut, l'heure en abscisse comme la frise de la barre du temps. */
+.year-plot { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; margin: 10px 0 8px; }
+.year-months { display: flex; flex-direction: column; font-family: var(--mono); font-size: 0.75rem; line-height: 1; color: var(--text-2); }
+.year-months span { flex: 1; }
+.year-chart { display: block; width: 100%; height: 183px; border-radius: 2px; }
+.year-plot .ticks { grid-column: 2; margin-top: 6px; padding: 0; }
+.year-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 8px; }
+.swatch.sun { background: var(--sun); }
+.swatch.shade { background: var(--text-2); opacity: 0.55; } /* même gris que le graphique (js/year.js) */
+.swatch.night { background: var(--band-night); }
+.year .fineprint { margin-top: 8px; }
 
 /* Boutons secondaires : fantômes, un contour d'un pixel, sans ombre. */
 .btn {
