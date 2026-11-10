@@ -6,6 +6,7 @@ import {
 } from './tz.js';
 import { parseHash, buildHash, isValidDateISO, isValidTime } from './state.js';
 import { searchPlace } from './geocode.js';
+import { nearestWall, offsetLngLat, facadeLit, litIntervals } from './facade.js';
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -21,6 +22,8 @@ const ui = {
   play: $('play'), date: $('date'), timeLabel: $('time-label'), tzLabel: $('tz-label'), now: $('now'), time: $('time'), status: $('status'),
   eventDate: $('event-date'), eventTime: $('event-time'), eventHint: $('event-hint'), eventHelp: $('event-help'),
   eventActions: $('event-actions'), eventClear: $('event-clear'), moment: $('moment'), eventMark: $('event-mark'),
+  facadeOn: $('facade-on'), facade: $('facade'), facadeAz: $('facade-az'), facadeDir: $('facade-dir'), facadeNote: $('facade-note'),
+  facadeHours: $('facade-hours'), facadeList: $('facade-list'), facadeBar: $('facade-bar'),
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -80,6 +83,7 @@ const state = {
   event: hash.event ? { date: hash.event.date, minutes: hhmmToMinutes(hash.event.time) } : null,
   eventMinutes: 0,
   scout: null,
+  facade: hash.facade ?? null, // azimut vers lequel la façade (ou le sujet) fait face, null = pas de façade
 };
 function hhmmToMinutes(s) {
   const [h, m] = s.split(':').map(Number);
@@ -132,6 +136,8 @@ const shadowMap = new ShadowMap('map', {
 });
 const map = shadowMap.map;
 let marker = null;
+let lastLit = null; // dernier ensoleillement du point : la façade se recalcule sans relancer le relief
+let facadeNote = ''; // d'où vient l'orientation de la façade (mur lu, ou aucun mur tout près)
 let day = null; // dayInfo courant
 let hourPositions = [];
 const debug = { frames: 0, stats: null, lastExposure: null, state, shadowMap };
@@ -264,7 +270,7 @@ function refreshSun() {
   ui.time.value = String(state.minutes);
   ui.time.setAttribute('aria-valuetext', formatMinutes(state.minutes));
   ui.date.value = state.date;
-  shadowMap.setSunPath(c, hourPositions, { azimuth: pos.azimuth, altitude: pos.altitude });
+  shadowMap.setSunPath(c, hourPositions, { azimuth: pos.azimuth, altitude: pos.altitude }, state.point ? state.facade : null);
   rememberMoment();
 }
 
@@ -373,6 +379,8 @@ async function computeExposure() {
   }
   ui.exposureHours.textContent = '…';
   ui.exposureList.innerHTML = '';
+  lastLit = null;
+  renderFacade();
   const res = await shadowMap.exposureAt(state.point, samples, 1.5);
   if (seq !== exposureSeq) return;
   debug.lastExposure = res;
@@ -386,39 +394,89 @@ async function computeExposure() {
     ui.exposureMeta.textContent = '';
     return;
   }
-  const lit = res.lit;
-  const intervals = [];
-  let litMin = 0;
-  let start = -1;
-  for (let i = 0; i <= lit.length; i++) {
-    const on = i < lit.length && lit[i] === 1;
-    if (on) litMin += step;
-    if (on && start < 0) start = i * step;
-    if (!on && start >= 0) {
-      intervals.push([start, i * step]);
-      start = -1;
-    }
-  }
-  ui.exposureHours.textContent = formatDuration(litMin);
-  ui.exposureList.innerHTML = intervals.length
+  lastLit = { lit: res.lit, azimuths: samples.map((s) => s.azimuth), step };
+  renderSlots(litIntervals(res.lit, step), ui.exposureHours, ui.exposureList, ui.exposureBar, 'Aucun soleil direct ce jour-là.');
+  renderFacade();
+  const alt = res.elevation != null ? `altitude ${Math.round(res.elevation)} m` : '';
+  const roof = res.surface != null && res.elevation != null && res.surface - res.elevation > 1 ? ` · sur un toit (${Math.round(res.surface - res.elevation)} m)` : '';
+  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à 1,5 m ${roof ? 'au-dessus du toit' : 'du sol'}`;
+}
+
+/** Durée totale, liste des créneaux et barre de la journée. */
+function renderSlots(intervals, hoursEl, listEl, barEl, empty) {
+  hoursEl.textContent = formatDuration(intervals.reduce((s, [a, b]) => s + b - a, 0));
+  listEl.innerHTML = intervals.length
     ? intervals.map(([a, b]) => `<li>de ${formatMinutes(a)} à ${formatMinutes(b)}</li>`).join('')
-    : '<li>Aucun soleil direct ce jour-là.</li>';
-  ui.exposureBar.innerHTML = '';
+    : `<li>${empty}</li>`;
+  barEl.innerHTML = '';
   let cursor = 0;
   for (const [a, b] of intervals) {
     const gap = document.createElement('i');
     gap.style.width = `${((a - cursor) / 1440) * 100}%`;
     gap.style.background = 'transparent';
-    ui.exposureBar.appendChild(gap);
+    barEl.appendChild(gap);
     const seg = document.createElement('i');
     seg.style.width = `${((b - a) / 1440) * 100}%`;
-    ui.exposureBar.appendChild(seg);
+    barEl.appendChild(seg);
     cursor = b;
   }
-  const alt = res.elevation != null ? `altitude ${Math.round(res.elevation)} m` : '';
-  const roof = res.surface != null && res.elevation != null && res.surface - res.elevation > 1 ? ` · sur un toit (${Math.round(res.surface - res.elevation)} m)` : '';
-  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à 1,5 m ${roof ? 'au-dessus du toit' : 'du sol'}`;
 }
+
+// ---------- Façade ou axe de prise de vue ----------
+function renderFacade() {
+  const on = state.facade != null;
+  ui.facadeOn.checked = on;
+  ui.facade.hidden = !on;
+  if (!on) return;
+  ui.facadeAz.value = String(state.facade);
+  ui.facadeDir.textContent = `${fmtDeg(state.facade)} ${cardinal(state.facade)}`;
+  ui.facadeNote.textContent = `${facadeNote}${facadeNote ? ' ' : ''}La flèche part de la façade vers la caméra : le soleil l'éclaire quand il est de ce côté.`;
+  if (!lastLit) {
+    ui.facadeHours.textContent = '…';
+    ui.facadeList.innerHTML = '';
+    ui.facadeBar.innerHTML = '';
+    return;
+  }
+  const lit = facadeLit(lastLit.lit, lastLit.azimuths, state.facade);
+  renderSlots(litIntervals(lit, lastLit.step), ui.facadeHours, ui.facadeList, ui.facadeBar, 'Aucun soleil sur la façade ce jour-là.');
+}
+
+/** Mur le plus proche d'un point, parmi les bâtiments affichés autour de lui. */
+function findWall(lngLat) {
+  if (!map.getLayer('ombres-buildings-3d')) return null;
+  const p = map.project([lngLat.lng, lngLat.lat]);
+  const feats = map.queryRenderedFeatures([[p.x - 40, p.y - 40], [p.x + 40, p.y + 40]], { layers: ['ombres-buildings-3d'] });
+  const polys = feats.flatMap((f) => (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : []));
+  return nearestWall(lngLat, polys);
+}
+
+/** Oriente la façade sur le mur le plus proche ; un point posé sur le toit descend 3 m devant ce mur, au sol. */
+function aimFacade(lngLat) {
+  const wall = findWall(lngLat);
+  if (!wall) {
+    facadeNote = 'Aucun mur à moins de 12 m : réglez l\'orientation.';
+    return lngLat;
+  }
+  state.facade = Math.round(wall.azimuth) % 360;
+  facadeNote = `Orientation lue sur le mur le plus proche${wall.inside ? '' : `, à ${Math.round(wall.distance)} m`}.`;
+  return wall.inside ? offsetLngLat(wall.foot, wall.normal, 3) : lngLat;
+}
+
+ui.facadeOn.addEventListener('change', () => {
+  if (ui.facadeOn.checked) {
+    state.facade = 180;
+    if (state.point) return setPoint(aimFacade(state.point));
+  } else state.facade = null;
+  renderFacade();
+  refreshAll();
+});
+ui.facadeAz.addEventListener('input', () => {
+  state.facade = Number(ui.facadeAz.value);
+  facadeNote = '';
+  renderFacade();
+  refreshSun();
+  scheduleHash();
+});
 
 // ---------- Événements carte ----------
 let dragging = false;
@@ -428,7 +486,8 @@ map.on('click', (e) => {
   if (dragging) return;
   const target = e.originalEvent && e.originalEvent.target;
   if (target && target.closest && target.closest('.maplibregl-marker')) return;
-  setPoint(e.lngLat);
+  // Façade active : un nouveau point lit l'orientation du mur le plus proche (déplacer le repère, lui, la garde).
+  setPoint(state.facade != null ? aimFacade(e.lngLat) : e.lngLat);
 });
 map.on('moveend', () => {
   const c = map.getCenter();
@@ -696,6 +755,7 @@ function syncHash(force = false) {
     mode: state.mode,
     opacity: state.opacity,
     event: state.event && { date: state.event.date, time: formatMinutes(state.event.minutes) },
+    facade: state.facade,
   });
   if (h !== location.hash) history.replaceState(null, '', h);
 }
@@ -712,6 +772,7 @@ if (timebar && 'ResizeObserver' in window) {
 
 // Premier affichage (la carte déclenchera aussi refreshAll à 'ready').
 renderEvent();
+renderFacade();
 refreshAll();
 if (state.point) setPoint(state.point);
 tzReady.then(() => {

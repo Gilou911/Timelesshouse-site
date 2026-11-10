@@ -271,6 +271,10 @@ body {
 .legend .hint { margin-top: 8px; font-size: 0.8125rem; }
 .range-label { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; font-size: 0.8125rem; color: var(--text-2); }
 .range-label input { width: 100%; height: var(--hit); margin: 0; accent-color: var(--accent); }
+.range-label output { color: var(--text); font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+/* Façade : sous le point, un second résultat plus discret que le premier. */
+.facade .hint { margin: 2px 0 12px; }
+.facade .exposure-total span { font-size: 1.75rem; }
 
 /* Boutons secondaires : fantômes, un contour d'un pixel, sans ombre. */
 .btn {

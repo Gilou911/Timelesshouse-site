@@ -54,6 +54,16 @@ test('cérémonie dans le lien : aller-retour, valeurs invalides ignorées', () 
   }
 });
 
+test('façade dans le lien : azimut entier de 0 à 359', () => {
+  const h = buildHash({ lat: 48.85, lng: 2.35, zoom: 17, facade: 179.6 });
+  assert.ok(/f=180/.test(h), h);
+  assert.equal(parseHash(h).facade, 180);
+  assert.equal(parseHash(buildHash({ lat: 48.85, lng: 2.35, zoom: 17, facade: 0 })).facade, 0, 'plein nord gardé');
+  assert.equal(parseHash(buildHash({ lat: 48.85, lng: 2.35, zoom: 17, facade: 359.7 })).facade, 0, '360° ramené à 0');
+  assert.equal(parseHash(buildHash({ lat: 48.85, lng: 2.35, zoom: 17, facade: null })).facade, undefined);
+  for (const bad of ['360', '-5', '12.5', 'sud', '']) assert.equal(parseHash(`#48.8/2.3/12?f=${bad}`).facade, undefined, `refusé : ${bad}`);
+});
+
 test('date et heure du lien : seules les valeurs réelles sont acceptées', () => {
   for (const d of ['2026-11-09', '2024-02-29', '1900-01-01', '2100-12-31']) assert.ok(isValidDateISO(d), d);
   for (const d of ['2026-02-31', '2025-02-29', '2026-13-01', '2026-00-10', '2026-04-31', '1899-12-31', '2101-01-01', '0002-01-01', '9999-99-99', '2026-1-9', '', null, undefined]) {

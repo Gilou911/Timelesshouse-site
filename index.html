@@ -81,6 +81,17 @@
           <small id="exposure-meta"></small>
           <button type="button" id="exposure-clear" class="link">Retirer le point</button>
         </div>
+        <label class="switch"><span>Façade ou axe de prise de vue</span><input type="checkbox" role="switch" id="facade-on"></label>
+        <div id="facade" class="facade" hidden>
+          <label class="range-label">
+            <span class="row"><span>Orientation</span><output id="facade-dir" for="facade-az">—</output></span>
+            <input type="range" id="facade-az" min="0" max="359" step="1" value="180">
+          </label>
+          <p class="hint" id="facade-note"></p>
+          <div class="exposure-total"><span id="facade-hours">—</span><small>de soleil sur la façade</small></div>
+          <ul id="facade-list" class="exposure-list"></ul>
+          <div class="exposure-bar" id="facade-bar" aria-hidden="true"></div>
+        </div>
       </div>
     </section>
 

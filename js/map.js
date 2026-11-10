@@ -290,6 +290,23 @@ export class ShadowMap {
         layout: { 'line-cap': 'round' },
         paint: { 'line-color': '#ffcc00', 'line-width': 4 },
       });
+      // Façade : flèche du mur vers la caméra, au bleu du point dont elle part, liserée de blanc pour le satellite.
+      map.addLayer({
+        id: 'ombres-sunpath-facade-casing',
+        type: 'line',
+        source: 'ombres-sunpath',
+        filter: ['==', ['get', 'kind'], 'facade'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 7 },
+      });
+      map.addLayer({
+        id: 'ombres-sunpath-facade',
+        type: 'line',
+        source: 'ombres-sunpath',
+        filter: ['==', ['get', 'kind'], 'facade'],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#2563d6', 'line-width': 3.5 },
+      });
       map.addLayer({
         id: 'ombres-sunpath-sun',
         type: 'circle',
@@ -700,9 +717,9 @@ export class ShadowMap {
 
   /**
    * Trace la course du soleil autour d'un point : graduations horaires, arc, rayon courant, direction de l'ombre.
-   * hours = [{ label, azimuth, altitude }], current = { azimuth, altitude }
+   * hours = [{ label, azimuth, altitude }], current = { azimuth, altitude }, facade = azimuth de la façade ou null
    */
-  setSunPath(lngLat, hours, current) {
+  setSunPath(lngLat, hours, current, facade = null) {
     const src = this.map.getSource('ombres-sunpath');
     if (!src) return;
     if (!lngLat) {
@@ -756,6 +773,19 @@ export class ShadowMap {
           geometry: { type: 'LineString', coordinates: [[lngLat.lng, lngLat.lat], tip(current.azimuth + 180, len)] },
         });
       }
+    }
+    if (facade != null) {
+      // Flèche dans l'anneau des heures : hampe de 0,5 R, pointe de 14 px à ±149°.
+      const a = (facade * Math.PI) / 180;
+      const tx = x + 0.5 * R * Math.sin(a);
+      const ty = y - 0.5 * R * Math.cos(a);
+      const head = (da) => mercatorToLngLat(tx + 14 * unitsPerPx * Math.sin(a + da), ty - 14 * unitsPerPx * Math.cos(a + da));
+      const end = mercatorToLngLat(tx, ty);
+      features.push({
+        type: 'Feature',
+        properties: { kind: 'facade' },
+        geometry: { type: 'MultiLineString', coordinates: [[[lngLat.lng, lngLat.lat], end], [head(2.6), end, head(-2.6)]] },
+      });
     }
     src.setData({ type: 'FeatureCollection', features });
   }
