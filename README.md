@@ -6,14 +6,14 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 
 - Curseur d'heure, choix de la date, lecture animée de la journée, bouton « Maintenant ».
 - Ombres calculées pixel par pixel à partir du relief (Terrain Tiles, 30 m ou mieux) et des hauteurs de bâtiments OpenStreetMap.
-- Panneau soleil : azimut, élévation, lever, coucher, midi solaire, durée du jour, heures dorées, longueur d'ombre.
+- Panneau soleil : azimut, élévation, lever, coucher, midi solaire, durée du jour, heures dorée, rose et bleue, longueur d'ombre.
 - Mode « Heures de soleil » : carte colorée du nombre d'heures de soleil direct reçues en chaque point sur la journée.
 - Clic sur la carte : heures de soleil direct reçues par ce point ce jour-là, avec les créneaux.
 - Course du soleil tracée autour du point (graduations horaires, direction du soleil et de l'ombre).
 - Repérage de tournage :
   - **Cérémonie** : date et heure d'un événement ; la barre du temps passe d'un geste du jour de la cérémonie à celui du
     repérage, chacun gardant son heure, et un trait marque l'heure de la cérémonie sur la frise.
-  - **Heures dorée et bleue** en bandes sur la frise du temps (soleil de −4° à +6°, et de −6° à −4°), avec leurs créneaux.
+  - **Heures dorée, rose et bleue** en bandes sur la frise du temps, avec leurs créneaux : dorée du lever (ou du coucher) à +6°, rose du coucher (ou jusqu'au lever) à −4°, quand le ciel rosit, bleue de −4° à −6°.
   - **Façade ou axe de prise de vue** : orientation lue sur le mur le plus proche (ou réglée à la main), créneaux où le
     soleil l'éclaire, flèche de la façade vers la caméra.
   - **Hauteur du point** mesuré : un étage, un balcon, un drone (1,5 m par défaut).
@@ -149,7 +149,7 @@ avant `js/app.js`. Toutes les clés sont facultatives.
 ## Comment ça marche
 
 1. **Soleil** (`js/sun.js`) : algorithme NOAA (Meeus) — azimut, élévation avec réfraction, lever/coucher ; bandes de
-   lumière de la frise (nuit, heure bleue, heure dorée, jour) par échantillonnage de l'élévation toutes les 4 minutes.
+   lumière de la frise (nuit, heure bleue, heure rose, heure dorée, jour) par échantillonnage de l'élévation toutes les 4 minutes.
    **Lune** (`js/moon.js`) : « MiniMoon » de Montenbruck et Pfleger, à 0,02° près d'astronomy-engine ; lever et coucher
    à moins de 30 s.
    Vérifié contre pvlib (NREL SPA) à mieux que 0,05°.

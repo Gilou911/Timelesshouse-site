@@ -14,7 +14,7 @@ const ui = {
   search: $('search'), searchInput: $('search-input'), results: $('results'), locate: $('locate'),
   panel: $('panel'), panelToggle: $('panel-toggle'),
   phase: $('phase'), azimuth: $('azimuth'), altitude: $('altitude'), altitudeNote: $('altitude-note'), sunrise: $('sunrise'), sunset: $('sunset'),
-  noon: $('noon'), daylength: $('daylength'), golden: $('golden'), blue: $('blue'), shadowRatio: $('shadow-ratio'),
+  noon: $('noon'), daylength: $('daylength'), golden: $('golden'), pink: $('pink'), blue: $('blue'), shadowRatio: $('shadow-ratio'),
   exposureHint: $('exposure-hint'), exposure: $('exposure'), exposureHours: $('exposure-hours'), exposureList: $('exposure-list'),
   exposureBar: $('exposure-bar'), exposureMeta: $('exposure-meta'), exposureClear: $('exposure-clear'),
   toggleShadows: $('toggle-shadows'), toggleBuildings: $('toggle-buildings'), toggleTerrain: $('toggle-terrain'),
@@ -191,7 +191,7 @@ function refreshDay() {
   ui.noon.textContent = `${t(day.solarNoon)} (${fmtDeg(day.noonAltitude, 1)})`;
   ui.daylength.textContent = formatDuration(day.dayLengthMinutes);
 
-  // Frise du curseur : nuit, heure bleue, heure dorée, jour, en bandes nettes, de minuit à minuit (heure civile).
+  // Frise du curseur : nuit, heure bleue, heure rose, heure dorée, jour, en bandes nettes, de minuit à minuit (heure civile).
   const { y, mo, d } = dateParts();
   const next = new Date(Date.UTC(y, mo - 1, d + 1));
   const dayStart = wallToUTC(state.tz, y, mo, d, 0, 0);
@@ -216,6 +216,7 @@ function refreshDay() {
     return bands.length === 1 ? 'toute la journée' : list.map((b) => `${t(b.from)}–⁠${t(b.to)}`).join(' · ');
   };
   ui.golden.textContent = ranges('golden');
+  ui.pink.textContent = ranges('pink');
   ui.blue.textContent = ranges('blue');
 
   // Positions horaires pour le tracé.

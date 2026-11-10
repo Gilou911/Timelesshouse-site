@@ -184,16 +184,21 @@ export function dayInfo(noonUTC, lat, lng) {
   };
 }
 
-// Limites des bandes de lumière, en élévation apparente (celle de lightPhase) : nuit | bleue | dorée | jour.
-const BAND_LIMITS = [-6, -4, 6];
-const BAND_KEYS = ['night', 'blue', 'golden', 'day'];
+/** Élévation apparente du centre du soleil au lever et au coucher affichés (bord supérieur sur l'horizon), vers −0,44°. */
+export const SUNSET_ALTITUDE = 90 - SUNRISE_ZENITH + refraction(90 - SUNRISE_ZENITH);
+
+// Limites des bandes de lumière, en élévation apparente (celle de lightPhase) : nuit | bleue | rose | dorée | jour.
+// L'heure rose va du coucher (ou jusqu'au lever) à −4° : elle commence à l'heure du coucher affichée.
+const BAND_LIMITS = [-6, -4, SUNSET_ALTITUDE, 6];
+const BAND_KEYS = ['night', 'blue', 'pink', 'golden', 'day'];
 const bandIndex = (alt) => BAND_LIMITS.filter((l) => alt >= l).length;
 
 /**
- * Bandes de lumière entre deux instants : nuit, heure bleue (−6° à −4°), heure dorée (−4° à +6°), jour.
+ * Bandes de lumière entre deux instants : nuit, heure bleue (−6° à −4°), heure rose (soleil couché, jusqu'à −4°),
+ * heure dorée (soleil levé, jusqu'à +6°), jour.
  * Élévation échantillonnée toutes les `stepMinutes`, chaque limite franchie interpolée entre deux échantillons :
  * jours polaires, nuits blanches et jours de changement d'heure n'ont pas de cas à part.
- * @returns {{key:'night'|'blue'|'golden'|'day', from:Date, to:Date}[]} contiguës, de `start` à `end`
+ * @returns {{key:'night'|'blue'|'pink'|'golden'|'day', from:Date, to:Date}[]} contiguës, de `start` à `end`
  */
 export function lightBands(start, end, lat, lng, stepMinutes = 4) {
   const t1 = end.getTime();
@@ -226,7 +231,8 @@ export function shadowLength(h, altitude) {
 /** Qualifie la lumière pour une élévation donnée (étiquette FR + clé). */
 export function lightPhase(altitude) {
   if (altitude >= 6) return { key: 'day', label: 'Jour' };
-  if (altitude >= -4) return { key: 'golden', label: altitude >= 0 ? 'Heure dorée' : 'Heure dorée (soleil couché)' };
+  if (altitude >= SUNSET_ALTITUDE) return { key: 'golden', label: 'Heure dorée' };
+  if (altitude >= -4) return { key: 'pink', label: 'Heure rose' };
   if (altitude >= -6) return { key: 'blue', label: 'Heure bleue' };
   if (altitude >= -12) return { key: 'nautical', label: 'Crépuscule nautique' };
   if (altitude >= -18) return { key: 'astro', label: 'Crépuscule astronomique' };

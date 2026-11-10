@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sunPosition, dayInfo, timesForZenith, shadowLength, refraction, lightBands } from '../../js/sun.js';
+import { sunPosition, dayInfo, timesForZenith, shadowLength, refraction, lightBands, lightPhase, SUNSET_ALTITUDE } from '../../js/sun.js';
 
 // Valeurs de référence calculées avec pvlib 0.16 (algorithme NREL SPA).
 const CASES = [
@@ -35,8 +35,8 @@ test('lever/coucher Paris 21 juin 2026 (heure d\'été UTC+2)', () => {
   assert.ok(d.dayLengthMinutes > 16 * 60 && d.dayLengthMinutes < 16.3 * 60, `durée ${d.dayLengthMinutes}`);
 });
 
-const KEYS = ['night', 'blue', 'golden', 'day'];
-const LIMIT = { 'night|blue': -6, 'blue|golden': -4, 'golden|day': 6 };
+const KEYS = ['night', 'blue', 'pink', 'golden', 'day'];
+const LIMIT = { 'night|blue': -6, 'blue|pink': -4, 'pink|golden': SUNSET_ALTITUDE, 'golden|day': 6 };
 /** Bandes d'un jour civil (minuit à minuit, décalage UTC fixe en heures) et contrôles communs. */
 function bandsOf(isoDay, offsetHours, lat, lng) {
   const start = new Date(Date.parse(`${isoDay}T00:00:00Z`) - offsetHours * 3600000);
@@ -52,31 +52,44 @@ function bandsOf(isoDay, offsetHours, lat, lng) {
     const lim = LIMIT[[a.key, b.key].sort((x, y) => KEYS.indexOf(x) - KEYS.indexOf(y)).join('|')];
     assert.ok(lim !== undefined, `on ne saute pas de bande : ${a.key} → ${b.key}`);
     const alt = sunPosition(b.from, lat, lng).altitude;
-    assert.ok(Math.abs(alt - lim) < 0.02, `${a.key} → ${b.key} à ${b.from.toISOString()} : élévation ${alt.toFixed(3)}° pour ${lim}°`);
+    // Au ras de l'horizon, la réfraction courbe l'élévation : l'interpolation sur 4 min s'y écarte de quelques secondes.
+    const tol = lim === SUNSET_ALTITUDE ? 0.05 : 0.02;
+    assert.ok(Math.abs(alt - lim) < tol, `${a.key} → ${b.key} à ${b.from.toISOString()} : élévation ${alt.toFixed(3)}° pour ${lim}°`);
   }
   return bands;
 }
 const local = (d, offsetHours) => new Date(d.getTime() + offsetHours * 3600000).toISOString().slice(11, 16);
 
-test('bandes de lumière, Paris au solstice d\'été : nuit, bleue, dorée, jour, dorée, bleue, nuit', () => {
+test('bandes de lumière, Paris au solstice d\'été : nuit, bleue, rose, dorée, jour, puis l\'inverse', () => {
   const bands = bandsOf('2026-06-21', 2, 48.8566, 2.3522);
-  assert.deepEqual(bands.map((b) => b.key), ['night', 'blue', 'golden', 'day', 'golden', 'blue', 'night']);
-  // Le lever (05:47) et le coucher (21:58) tombent dans les heures dorées ; l'heure bleue dure une vingtaine de minutes.
-  assert.ok(local(bands[2].from, 2) < '05:47' && local(bands[2].to, 2) > '05:47', `heure dorée du matin ${local(bands[2].from, 2)}–${local(bands[2].to, 2)}`);
-  assert.ok(local(bands[4].from, 2) < '21:58' && local(bands[4].to, 2) > '21:58', `heure dorée du soir ${local(bands[4].from, 2)}–${local(bands[4].to, 2)}`);
-  const blueMin = (bands[5].to - bands[5].from) / 60000;
+  assert.deepEqual(bands.map((b) => b.key), ['night', 'blue', 'pink', 'golden', 'day', 'golden', 'pink', 'blue', 'night']);
+  // L'heure rose finit au lever affiché et commence au coucher affiché ; heures rose et bleue durent une vingtaine de minutes.
+  const d = dayInfo(new Date('2026-06-21T12:00:00Z'), 48.8566, 2.3522);
+  assert.ok(Math.abs(bands[2].to - d.sunrise) < 60000, `lever ${local(d.sunrise, 2)}, fin de l'heure rose ${local(bands[2].to, 2)}`);
+  assert.ok(Math.abs(bands[6].from - d.sunset) < 60000, `coucher ${local(d.sunset, 2)}, début de l'heure rose ${local(bands[6].from, 2)}`);
+  const pinkMin = (bands[6].to - bands[6].from) / 60000;
+  assert.ok(pinkMin > 15 && pinkMin < 40, `heure rose du soir : ${pinkMin} min`);
+  const blueMin = (bands[7].to - bands[7].from) / 60000;
   assert.ok(blueMin > 15 && blueMin < 30, `heure bleue du soir : ${blueMin} min`);
 });
 
+test('phase de lumière : dorée tant que le soleil est levé, rose une fois couché, bleue sous −4°', () => {
+  assert.equal(lightPhase(3).label, 'Heure dorée');
+  assert.equal(lightPhase(SUNSET_ALTITUDE).label, 'Heure dorée');
+  assert.equal(lightPhase(-1).label, 'Heure rose');
+  assert.equal(lightPhase(-4).label, 'Heure rose');
+  assert.equal(lightPhase(-5).label, 'Heure bleue');
+});
+
 test('bandes de lumière aux hautes latitudes : nuit polaire, jour polaire, nuit blanche', () => {
-  // Tromsø, 21 décembre : le soleil culmine vers −3° : de l'heure dorée à midi, aucun « jour ».
+  // Tromsø, 21 décembre : le soleil culmine vers −3° : de l'heure rose à midi, ni heure dorée ni « jour ».
   const tromso = bandsOf('2026-12-21', 1, 69.6492, 18.9553).map((b) => b.key);
-  assert.ok(!tromso.includes('day') && tromso.includes('golden') && tromso[0] === 'night', tromso.join(' '));
+  assert.ok(!tromso.includes('day') && !tromso.includes('golden') && tromso.includes('pink') && tromso[0] === 'night', tromso.join(' '));
   // Longyearbyen, 21 juin : soleil toujours au-dessus de +6°.
   assert.deepEqual(bandsOf('2026-06-21', 2, 78.2232, 15.6267).map((b) => b.key), ['day']);
-  // Arkhangelsk, 21 juin : le soleil ne descend qu'à −2° : ni nuit ni heure bleue.
+  // Arkhangelsk, 21 juin : le soleil ne descend qu'à −2° : ni nuit ni heure bleue, mais une heure rose vers minuit.
   const ark = bandsOf('2026-06-21', 3, 64.5401, 40.5433).map((b) => b.key);
-  assert.ok(!ark.includes('night') && !ark.includes('blue') && ark.includes('golden'), ark.join(' '));
+  assert.ok(!ark.includes('night') && !ark.includes('blue') && ark.includes('golden') && ark.includes('pink'), ark.join(' '));
 });
 
 test('nuit polaire à Tromsø, jour polaire à Longyearbyen', () => {

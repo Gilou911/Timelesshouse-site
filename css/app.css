@@ -28,6 +28,7 @@
   /* Bandes de lumière de la frise : l'heure bleue en indigo, loin du bleu des commandes ; le reste aux couleurs du soleil. */
   --band-night: var(--night);
   --band-blue: #5856d6;
+  --band-pink: #ff2d55;
   --band-golden: var(--dawn);
   --band-day: var(--day);
   --shadow: 0 1px 2px rgba(17, 17, 50, 0.06), 0 20px 40px rgba(17, 17, 50, 0.1);
@@ -75,6 +76,7 @@
     --day: #ffd60a;
     --night: rgba(163, 163, 179, 0.18);
     --band-blue: #5e5ce6;
+    --band-pink: #ff375f;
     --shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
   }
 }
@@ -211,6 +213,7 @@ body {
 /* Légende de la frise : la couleur de la bande devant son nom. */
 .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 2px; vertical-align: -1px; }
 .swatch.golden { background: var(--band-golden); }
+.swatch.pink { background: var(--band-pink); }
 .swatch.blue { background: var(--band-blue); }
 
 .hint { margin: 0; font-size: 0.875rem; color: var(--text-2); line-height: 1.5; }

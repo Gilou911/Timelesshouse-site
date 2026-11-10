@@ -553,8 +553,9 @@ await scenario('Repérage : frise, lune, cérémonie et repérage, façade, haut
 
   // Frise : bandes nettes, et les créneaux dans le panneau.
   const frise = await page.evaluate(() => document.getElementById('time').style.getPropertyValue('--daylight'));
-  assert.ok(/--band-blue/.test(frise) && /--band-golden/.test(frise) && /--band-day/.test(frise), `frise : ${frise.slice(0, 160)}`);
+  assert.ok(/--band-blue/.test(frise) && /--band-pink/.test(frise) && /--band-golden/.test(frise) && /--band-day/.test(frise), `frise : ${frise.slice(0, 160)}`);
   assert.match(await page.textContent('#golden'), /^\d\d:\d\d–\u2060\d\d:\d\d\u00a0· \d\d:\d\d–\u2060\d\d:\d\d$/);
+  assert.match(await page.textContent('#pink'), /^\d\d:\d\d–\u2060\d\d:\d\d\u00a0· \d\d:\d\d–\u2060\d\d:\d\d$/);
   assert.match(await page.textContent('#blue'), /^\d\d:\d\d–/);
   // Lune : le lendemain de la nouvelle lune du 9 novembre 2026.
   assert.equal(await page.textContent('#moon-phase'), 'Nouvelle lune');
