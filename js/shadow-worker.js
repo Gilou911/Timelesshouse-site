@@ -2,9 +2,10 @@
 // (relief + bâtiments) et calcule les ombres à la demande.
 import {
   DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, depthToRGBA, pointExposure, rowScaleFactors,
-  exposureToRGBA, renderShadows, sunIsUp, surfaceAt, horizonProfile, mercatorToLngLat, metersPerUnit,
+  exposureToRGBA, renderShadows, sunIsUp, surfaceAt, horizonProfile, mercatorToLngLat, metersPerUnit, treesAround,
 } from './shadow-engine.js';
 import { canDecodePNG, decodePNG, pngSize } from './png.js';
+import { treeShape } from './trees.js';
 
 // Décodage des tuiles PNG dans le worker. Le décodeur maison (png.js) passe en premier : il rend les octets
 // exacts du fichier. Le canvas ne sert que de repli, et seulement s'il relit fidèlement ce qu'on y dessine.
@@ -162,7 +163,7 @@ async function runPool(tasks, limit) {
 
 async function buildHeightfield(msg) {
   const token = ++hfToken;
-  const { id, grid, demZoom, buildings, trees, cellMeters, latCenter, useTerrain, useBuildings } = msg;
+  const { id, grid, demZoom, buildings, trees, singleTrees, treesInfo, cellMeters, latCenter, useTerrain, useBuildings } = msg;
   const { w, h } = grid;
   const T = new Float32Array(w * h);
   let tilesLoaded = 0;
@@ -226,11 +227,16 @@ async function buildHeightfield(msg) {
   current = {
     id, grid, H, T, canopy, depth: new Float32Array(w * h), depthValid: false, acc: null, accMaxMinutes: 0, cellMeters, rowScale,
     demZoom: tilesLoaded > 0 ? demZoom : null, // null : pas de relief, donc pas d'horizon lointain non plus
+    trees: prepareTrees(grid, T, singleTrees),
   };
+  const info = treesInfo || {};
   postMessage({
     type: 'heightfield-ready',
     id,
-    stats: { tilesLoaded, tilesMissing, buildings: touched, wooded: canopyCells / (w * h), minH, maxH, w, h, terrainUnsupported },
+    stats: {
+      tilesLoaded, tilesMissing, buildings: touched, wooded: canopyCells / (w * h), minH, maxH, w, h, terrainUnsupported,
+      trees: current.trees ? current.trees.n : 0, treesLoading: !!info.loading, treesFailed: !!info.failed,
+    },
   });
   if (mode === 'exposure') {
     // La demande la plus récente l'emporte (une date changée pendant le téléchargement du relief, par exemple).
@@ -239,6 +245,32 @@ async function buildHeightfield(msg) {
   } else if (lastSun) {
     render({ id, ...lastSun });
   }
+}
+
+/**
+ * Arbres isolés (unités Mercator, hauteur et diamètre du houppier, 0 = inconnu) → cellules de la grille, avec le sol
+ * au pied de chaque arbre et son houppier (voir treeShape). Les arbres hors de la grille sont écartés.
+ */
+function prepareTrees(grid, T, st) {
+  if (!st || !st.x || !st.x.length) return null;
+  const { w, h, originX, originY, cellUnits } = grid;
+  const m = st.x.length;
+  const out = { n: 0, gx: new Float32Array(m), gy: new Float32Array(m), cz: new Float32Array(m), r: new Float32Array(m), rv: new Float32Array(m), base: new Float32Array(m) };
+  for (let i = 0; i < m; i++) {
+    const gx = (st.x[i] - originX) / cellUnits;
+    const gy = (st.y[i] - originY) / cellUnits;
+    if (!(gx >= 0 && gy >= 0 && gx < w && gy < h)) continue;
+    const base = T[Math.floor(gy) * w + Math.floor(gx)];
+    const s = treeShape(st.h[i], st.d[i]);
+    const k = out.n++;
+    out.gx[k] = gx;
+    out.gy[k] = gy;
+    out.base[k] = base;
+    out.cz[k] = base + (s.hb + s.h) / 2;
+    out.rv[k] = (s.h - s.hb) / 2;
+    out.r[k] = s.r;
+  }
+  return out.n ? out : null;
 }
 
 function newestExposure(a, b) {
@@ -284,7 +316,7 @@ async function exposureMap(msg) {
     return;
   }
   const token = ++exposureToken;
-  const { grid, H, T, depth, cellMeters, rowScale } = current;
+  const { grid, H, T, depth, cellMeters, rowScale, trees } = current;
   const { w, h } = grid;
   const acc = new Float32Array(w * h);
   const t0 = performance.now();
@@ -297,7 +329,7 @@ async function exposureMap(msg) {
     }
     const perCell = Number.isFinite(s.declination) && Number.isFinite(s.minutesUTC);
     if (sunIsUp(s) || perCell) {
-      renderShadows(H, grid, s, cellMeters, rowScale, depth, T);
+      renderShadows(H, grid, s, cellMeters, rowScale, depth, T, trees);
       for (let i = 0; i < n; i++) if (depth[i] === 0) acc[i] += msg.stepMinutes;
     }
     k++;
@@ -341,10 +373,10 @@ function render(msg) {
     postMessage({ type: 'frame-skipped', requestId: msg.requestId });
     return;
   }
-  const { grid, H, T, depth, cellMeters, rowScale } = current;
+  const { grid, H, T, depth, cellMeters, rowScale, trees } = current;
   const { w, h } = grid;
   const t0 = performance.now();
-  renderShadows(H, grid, sunFromMsg(msg), cellMeters, rowScale, depth, T);
+  renderShadows(H, grid, sunFromMsg(msg), cellMeters, rowScale, depth, T, trees);
   current.depthValid = true;
   const rgba = depthToRGBA(depth, w, h, takeBuffer(w * h * 4), style);
   postMessage(
@@ -440,14 +472,16 @@ async function exposure(msg) {
     postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null, reason: 'stale' });
     return;
   }
-  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, eye, rowScale, { base, horizon: far && far.profile });
+  const cellM = cellMeters * (rowScale ? rowScale[Math.floor(gy)] : 1);
+  const near = cur.trees ? treesAround(cur.trees, gx, gy, base + eye, cellM) : null;
+  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, eye, rowScale, { base, horizon: far && far.profile, trees: near });
   postMessage({
     type: 'exposure-result',
     requestId: msg.requestId,
     lit,
     elevation: T[i],
     surface: base,
-    underTrees: !!(canopy && canopy[i]),
+    underTrees: !!((canopy && canopy[i]) || (near && near.under)),
     horizon: far ? (far.complete ? 'complete' : 'partial') : 'none',
   });
 }

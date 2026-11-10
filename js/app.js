@@ -622,6 +622,9 @@ shadowMap.on('heightfield', (stats) => {
   parts.push(`relief ${stats.tilesLoaded} tuile${stats.tilesLoaded > 1 ? 's' : ''}${stats.tilesMissing ? ` (${stats.tilesMissing} manquante${stats.tilesMissing > 1 ? 's' : ''})` : ''}`);
   parts.push(`${stats.buildings.toLocaleString('fr-FR')} bâtiment${stats.buildings > 1 ? 's' : ''}`);
   if (stats.wooded > 0) parts.push(`bois\u00a0${Math.max(1, Math.round(stats.wooded * 100))}\u00a0%`); // insécable : jamais un « % » seul à la ligne
+  if (stats.trees > 0) parts.push(`${stats.trees.toLocaleString('fr-FR')}\u00a0arbre${stats.trees > 1 ? 's' : ''}`);
+  if (stats.treesLoading) parts.push('arbres en chargement…');
+  else if (stats.treesFailed) parts.push('arbres indisponibles pour l\'instant');
   setStatus(parts.join(' · '));
   if (state.point) computeExposure();
 });

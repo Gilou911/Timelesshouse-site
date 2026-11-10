@@ -5,8 +5,10 @@ l'heure et la date pour voir où tombent les ombres du **relief**, des **bâtime
 Pensée pour vivre sur `perso.timelesshouse.org`.
 
 - Curseur d'heure, choix de la date, lecture animée de la journée, bouton « Maintenant ».
-- Ombres calculées pixel par pixel à partir du relief (Terrain Tiles, 30 m ou mieux), des hauteurs de bâtiments OpenStreetMap
-  et des bois et forêts (canopée de 15 m), avec un interrupteur « Arbres ».
+- Ombres calculées pixel par pixel à partir du relief (Terrain Tiles, 30 m ou mieux), des hauteurs de bâtiments OpenStreetMap,
+  des bois et forêts (canopée de 15 m) et, à partir du zoom 15, des arbres isolés : à Paris la liste des arbres de la
+  Ville (hauteur de chacun), ailleurs ceux d'OpenStreetMap. Chaque arbre est montré en volume (tronc et houppier arrondi)
+  et porte son ombre ronde, qui se détache du pied quand le soleil baisse. Un interrupteur « Arbres » les retire tous.
 - Panneau soleil : azimut, élévation, lever, coucher, midi solaire, durée du jour, heures dorée, rose et bleue, longueur d'ombre.
 - Mode « Heures de soleil » : carte colorée du nombre d'heures de soleil direct reçues en chaque point sur la journée.
 - Clic sur la carte : heures de soleil direct reçues par ce point ce jour-là, avec les créneaux.
@@ -115,8 +117,11 @@ L'application tient dans une politique de sécurité de contenu stricte. Celle-c
 vrais serveurs de tuiles : plan, bâtiments, relief, satellite et recherche de lieu.
 
 ```
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; connect-src 'self' https://tiles.openfreemap.org https://s3.amazonaws.com https://server.arcgisonline.com https://nominatim.openstreetmap.org
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; connect-src 'self' https://tiles.openfreemap.org https://s3.amazonaws.com https://server.arcgisonline.com https://nominatim.openstreetmap.org https://opendata.paris.fr https://overpass-api.de
 ```
+
+- `opendata.paris.fr` et `overpass-api.de` servent les arbres isolés (Ville de Paris, OpenStreetMap). Sans eux, la carte
+  marche, mais sans arbres isolés (les bois restent).
 
 - `worker-src blob:` est obligatoire : MapLibre lance ses workers depuis une URL `blob:`. Sans lui, ils sont bloqués.
 - Envoyez l'en-tête sur la page et sur les fichiers de `js/` : le worker des ombres applique la politique reçue avec
@@ -131,7 +136,8 @@ Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
 ```bash
 npm install          # dépendances de développement uniquement (MapLibre, tz-lookup pour vendor/)
 npm test             # tests unitaires : soleil (référence NREL SPA), lune (référence astronomy-engine), bandes de lumière,
-                     # façades, moteur d'ombres, arbres, horizon lointain, année, fuseaux, URL, carnet de lieux
+                     # façades, moteur d'ombres, bois, arbres isolés (listes, formes, ombres, chargement),
+                     # horizon lointain, année, fuseaux, URL, carnet de lieux
 npm run serve        # http://localhost:8787 — fond de carte factice (style OpenFreeMap réel, tuiles de test) et vrai relief
 npm run test:e2e     # Chromium + Playwright : rendu réel, captures dans tests/e2e/out/
                      # (Playwright n'est pas dans package.json : npm install -D playwright && npx playwright install chromium ;
@@ -177,17 +183,30 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    cellules, donc un rendu en quelques dizaines de millisecondes même en 1 000 × 1 000.
 4. **Heures de soleil** : même balayage répété toutes les 20 minutes de la journée, en cumulant les minutes éclairées
    par cellule (environ une seconde sur un ordinateur portable).
-5. **Un point mesuré** : un rayon par instant, du point vers le soleil, à travers la grille (relief, bâtiments, bois). Au-delà
+5. **Arbres isolés** (`js/trees.js`), à partir du zoom 15 : la vue et 250 m autour sont découpées en tuiles de zoom 15
+   (800 m à Paris). Chaque tuile manquante est demandée une fois, en une requête par source pour toutes les tuiles
+   manquantes : à la Ville de Paris (jeu « les-arbres », hauteur et circonférence de chaque arbre) quand la tuile touche
+   Paris, et partout à OpenStreetMap par Overpass (`natural=tree`, hauteur, diamètre du houppier ou circonférence quand
+   ils sont notés ; `natural=tree_row`, un arbre tous les 8 m). Un arbre d'OpenStreetMap à moins de 3 m d'un arbre de la
+   Ville est le même et n'est pas compté deux fois. Les tuiles reçues sont gardées 30 jours dans le cache du navigateur :
+   Overpass met souvent 20 s ou plus à répondre, et demande d'attendre quand il est saturé (nouvel essai après 5, 15 puis
+   45 s). Chaque arbre devient un houppier en ellipsoïde posé sur un tronc : hauteur connue, sinon tirée de la
+   circonférence, sinon 10 m ; houppier de 0,6 fois la hauteur (2 à 16 m) s'il n'est pas noté, à partir du tiers de la
+   hauteur (1,5 à 5 m). Son ombre est calculée après le balayage, cellule par cellule, en lançant le rayon de soleil
+   depuis la surface (sol ou toit) : elle se détache du pied quand le soleil baisse, comme sous un vrai arbre. En 3D, un
+   tronc et cinq tranches de cylindre (couche `fill-extrusion`, éclairée par la lumière du soleil comme les bâtiments).
+6. **Un point mesuré** : un rayon par instant, du point vers le soleil, à travers la grille (relief, bâtiments, bois). Au-delà
    du bord de la grille, un **horizon lointain** prend le relais : sur des tuiles de relief de zoom 11 (environ 55 m),
    l'élévation apparente du relief jusqu'à 20 km est relevée dans 360 directions, courbure de la Terre comprise ; le soleil
    doit passer au-dessus. Le jour : un instant toutes les 5 minutes. L'année : toutes les 10 minutes, 365 jours, à l'heure
-   civile (changements d'heure compris), soit 52 560 instants calculés en quelques dizaines de millisecondes.
-6. **Vidéo** (`js/record.js`) : à chaque rendu de MapLibre, l'image est recopiée sur un canvas 2D, dans le même rendu
+   civile (changements d'heure compris), soit 52 560 instants calculés en quelques dizaines de millisecondes. Les
+   houppiers des arbres isolés à moins de 500 m arrêtent aussi le soleil ; un point sous un houppier est « sous les arbres ».
+7. **Vidéo** (`js/record.js`) : à chaque rendu de MapLibre, l'image est recopiée sur un canvas 2D, dans le même rendu
    (sans `preserveDrawingBuffer`), qui y incruste l'heure, la date et le crédit des données ; `canvas.captureStream(30)`
    et `MediaRecorder` en font la vidéo (8 Mb/s, grand côté de 1 920 px au plus, dimensions paires pour H.264).
    Pas de GIF : il faudrait un encodeur, donc une bibliothèque de plus, et une journée de carte en GIF pèserait des
    dizaines de Mo pour 256 couleurs.
-7. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
+8. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
    Le relief et les bâtiments 3D sont des couches MapLibre classiques. La lumière des bâtiments 3D (`map.setLight`, ancre
    « carte ») est placée à l'azimut et à la hauteur du soleil, sans transition ; du coucher à −6°, elle s'assombrit et
    monte au zénith (`sunLight`, `js/map.js`).
@@ -200,6 +219,8 @@ avant `js/app.js`. Toutes les clés sont facultatives.
 | Fond « Satellite » | Esri World Imagery | Attribution Esri affichée. Esri ne documente pas clairement l'usage sans clé dans une app publique : pour un usage intensif ou commercial, prévoir une clé ArcGIS ou une autre source (ex. Sentinel-2 cloudless d'EOX, CC BY-NC-SA, zoom ≤ 14) |
 | Relief | [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) sur AWS Open Data (Mapzen : SRTM, EU-DEM, etc.) | Ouvert, attribution affichée |
 | Recherche de lieu | [Nominatim](https://nominatim.org) | Usage léger : une requête par recherche validée, jamais d'autocomplétion |
+| Arbres isolés à Paris | [Les arbres](https://opendata.paris.fr/explore/dataset/les-arbres/), Ville de Paris (opendata.paris.fr) | ODbL, crédit « Ville de Paris » affiché quand ses arbres sont à l'écran |
+| Arbres isolés ailleurs | OpenStreetMap par [Overpass API](https://overpass-api.de) (serveur public) | ODbL ; serveur prévu pour un usage humain depuis le navigateur, réponses gardées 30 jours pour le ménager |
 | Fuseaux horaires | [@photostructure/tz-lookup](https://github.com/photostructure/tz-lookup) (CC0, données tz 2025), embarqué dans `vendor/` | — |
 | Carte | [MapLibre GL JS](https://maplibre.org) 5, embarqué dans `vendor/` | BSD-3 |
 
@@ -217,9 +238,15 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
   montagne, l'ombre d'un sommet hors de la vue manque. Les mesures d'un point (jour, année, façade) comptent en plus le
   relief jusqu'à 20 km, à 55 m près ; les bâtiments et les arbres plus lointains n'y entrent pas.
 - Les ombres des bâtiments situés juste hors de la zone chargée peuvent manquer en bord de carte.
-- Arbres : seuls les bois et forêts d'OpenStreetMap comptent, tous à 15 m de haut et feuillus toute l'année. Les arbres
-  isolés et les alignements de rues n'y sont pas : il faudrait une autre source (Overpass), donc une nouvelle origine
-  externe à ajouter à la politique de sécurité. Les parcs, surtout des pelouses, ne comptent pas.
+- Bois et forêts d'OpenStreetMap : tous à 15 m de haut. Les parcs, surtout des pelouses, ne comptent pas : seuls leurs
+  arbres isolés listés (Ville de Paris, OpenStreetMap) portent ombre.
+- Arbres isolés : à partir du zoom 15 seulement, et seulement ceux de la vue et de 250 m autour. Hors de Paris, seuls
+  les arbres notés dans OpenStreetMap existent : beaucoup de villes sont bien couvertes, la campagne et les jardins privés
+  beaucoup moins. Leur hauteur y manque souvent (10 m par défaut). Le premier passage sur un lieu attend Overpass
+  (souvent 20 à 60 s, parfois plus quand le serveur public est saturé ; « arbres en chargement… » s'affiche) ; les
+  passages suivants sont immédiats.
+- Tous les arbres sont feuillus toute l'année et leur houppier est opaque : en hiver, sous un platane sans feuilles,
+  l'ombre est en réalité bien plus légère. Le tronc ne porte pas d'ombre.
 - Un bois est vu d'en haut : sa cime est au soleil, son ombre tombe sur le terrain découvert voisin. Un point posé dans un
   bois est mesuré au sol, sous les arbres (à hauteur de drone, au-dessus).
 - Lever et coucher du soleil et de la lune sont astronomiques : le relief qui masque l'horizon n'y entre pas (il entre en

@@ -75,6 +75,29 @@ const landcoverIndex = new GeoJSONVT({
   ],
 }, VT_OPTIONS);
 
+// ---- Arbres isolés factices, entre le damier et le bois (520 à 560 m à l'est de la tour) ----
+// Ville de Paris : 5 arbres de 15 m alignés nord-sud. OpenStreetMap : un doublon (à 0,5 m du premier), deux arbres à
+// lui, et un alignement de 104 m tracé comme une ligne (natural=tree_row).
+const at = (dxM, dyM) => [P0.lng + dxM / (111320 * Math.cos((P0.lat * Math.PI) / 180)), P0.lat + dyM / 111320];
+const PARIS_TREES = [-100, -50, 0, 50, 100].map((dy) => at(520, dy));
+const OSM_TREES = [[at(520.5, -100), '15'], [at(560, 0), '10'], [at(560, 40), '']];
+const OSM_ROW = [at(520, 110), at(520, 214)]; // 104 m : 13 intervalles de 8 m, 14 arbres, dans la grille à z17
+const inBox = ([lng, lat], [s, w, n, e]) => lat >= s && lat <= n && lng >= w && lng <= e;
+function parisTreesResponse(where) {
+  const m = /in_bbox\(geo_point_2d,([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\)/.exec(where || '');
+  const box = m ? m.slice(1).map(Number) : [-90, -180, 90, 180];
+  return PARIS_TREES.filter((p) => inBox(p, box)).map(([lon, lat]) => ({ geo_point_2d: { lon, lat }, hauteurenm: 15, circonferenceencm: 120 }));
+}
+function overpassResponse(query) {
+  const m = /\[bbox:([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\]/.exec(query || '');
+  const box = m ? m.slice(1).map(Number) : [-90, -180, 90, 180];
+  const elements = OSM_TREES.filter(([p]) => inBox(p, box)).map(([p, h], id) => ({ type: 't', id, geometry: { type: 'Point', coordinates: p }, tags: { h, d: '', c: '' } }));
+  if (OSM_ROW.some((p) => inBox(p, box))) {
+    elements.push({ type: 'way', id: 1, geometry: OSM_ROW.map(([lon, lat]) => ({ lat, lon })), tags: { natural: 'tree_row', height: '12' } });
+  }
+  return { version: 0.6, elements };
+}
+
 // ---- Tuile raster factice : fond clair avec grille ----
 const rasterTile = (() => {
   const w = 256;
@@ -138,10 +161,27 @@ export function startServer(port = 0, { injectConfig = false } = {}) {
     let m;
     if (injectConfig && (url.pathname === '/' || url.pathname === '/index.html')) {
       // Mode « npm run serve » : la page pointe vers le style factice et le relais de relief local.
-      const cfg = { demUrl: `${base}/dem/{z}/{x}/{y}.png`, planStyle: `${base}/mock/ofm/bright.json`, satelliteStyle: `${base}/mock/style.json`, openFreeMap: `${base}/mock/ofm` };
+      const cfg = {
+        demUrl: `${base}/dem/{z}/{x}/{y}.png`, planStyle: `${base}/mock/ofm/bright.json`, satelliteStyle: `${base}/mock/style.json`, openFreeMap: `${base}/mock/ofm`,
+        parisTreesUrl: `${base}/mock/paris-trees`, overpassUrl: `${base}/mock/overpass`,
+      };
       const html = readFileSync(join(ROOT, 'index.html'), 'utf8').replace('<script src="vendor/maplibre-gl.js', `<script>window.OMBRES_CONFIG = ${JSON.stringify(cfg)};</script>\n  <script src="vendor/maplibre-gl.js`);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(html);
+    }
+    if (url.pathname === '/mock/paris-trees') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      return res.end(JSON.stringify(parisTreesResponse(url.searchParams.get('where'))));
+    }
+    if (url.pathname === '/mock/overpass') {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        const data = new URLSearchParams(body).get('data');
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify(overpassResponse(data)));
+      });
+      return undefined;
     }
     if (url.pathname === '/mock/style.json') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

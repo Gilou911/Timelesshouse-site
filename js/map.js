@@ -1,9 +1,19 @@
 // Carte MapLibre + couche d'ombres (worker) + tracé du soleil.
 import { lngLatToMercator, mercatorToLngLat, metersPerUnit } from './shadow-engine.js';
+import { TreeStore, TREES_MIN_ZOOM, treeFeatures } from './trees.js';
 
 const CFG = (typeof window !== 'undefined' && window.OMBRES_CONFIG) || {};
 export const DEM_URL = CFG.demUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 export const OFM = CFG.openFreeMap || 'https://tiles.openfreemap.org';
+// Arbres isolés : la liste de la Ville de Paris (dans Paris), et OpenStreetMap partout par le serveur public Overpass.
+const PARIS_TREES_URL = CFG.parisTreesUrl || 'https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/les-arbres/exports/json';
+const OVERPASS_URL = CFG.overpassUrl || 'https://overpass-api.de/api/interpreter';
+const OSM_LINK = '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+const TREES_ATTRIBUTION = {
+  paris: `Arbres : <a href="https://opendata.paris.fr/explore/dataset/les-arbres/" target="_blank" rel="noopener">Ville de Paris</a>, ${OSM_LINK}`,
+  osm: `Arbres : ${OSM_LINK}`,
+};
+const TREES_MARGIN_M = 250; // les arbres un peu hors de la vue y portent aussi leur ombre
 export const ESRI_URL =
   CFG.esriUrl || 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 // Attente maximale du repos de la carte avant de calculer avec les tuiles déjà chargées.
@@ -115,6 +125,10 @@ export class ShadowMap {
     this.stats = null;
     this.vectorSource = null;
     this.ready = false;
+
+    this.trees = new TreeStore({ parisUrl: PARIS_TREES_URL, overpassUrl: OVERPASS_URL, onUpdate: () => this._onTreesUpdate() });
+    this._treesFC = EMPTY_FC;
+    this._treesParis = false; // arbres de la Ville de Paris dans la vue : leur crédit est affiché
 
     this.canvas = document.createElement('canvas');
     this.canvas.width = 2;
@@ -295,6 +309,9 @@ export class ShadowMap {
       );
     }
 
+    this._firstSymbol = firstSymbol;
+    this._addTreesLayer();
+
     // Tracé du soleil (au-dessus de tout).
     if (!map.getSource('ombres-sunpath')) map.addSource('ombres-sunpath', { type: 'geojson', data: EMPTY_FC });
     if (!map.getLayer('ombres-sunpath-arc')) {
@@ -470,6 +487,7 @@ export class ShadowMap {
     let x1 = Math.min(bx1, cx + maxHalfW);
     let y0 = Math.max(by0, cy - maxHalfH);
     let y1 = Math.min(by1, cy + maxHalfH);
+    const view = [x0, y0, x1, y1]; // vue (bornée près de l'horizon en 3D), avant la marge du calcul
     const margin = 0.3;
     const W = x1 - x0;
     const Hh = y1 - y0;
@@ -504,6 +522,7 @@ export class ShadowMap {
     const demZoom = Math.max(0, Math.min(15, Math.floor(Math.log2(1 / (cellUnits * 256)))));
     const buildings = this._collectPolygons('building', buildingHeight, x0, x1);
     const trees = this.options.trees ? this._collectPolygons('landcover', treeHeight, x0, x1) : null;
+    const single = this._singleTrees(view, x0, x1);
     const id = ++this.hfId;
     this.grids.set(id, grid);
     for (const k of this.grids.keys()) if (k < id - 2 && k !== this.currentGridId) this.grids.delete(k);
@@ -518,14 +537,102 @@ export class ShadowMap {
         demZoom,
         buildings,
         trees,
+        singleTrees: single.arrays,
+        treesInfo: { loading: single.loading, failed: single.failed },
         cellMeters,
         latCenter: center.lat,
         useTerrain: this.options.terrainShadows !== false,
         useBuildings: this.options.buildingShadows !== false,
         exposure,
       },
-      trees ? [...buffersOf(buildings), ...buffersOf(trees)] : buffersOf(buildings),
+      [
+        ...buffersOf(buildings),
+        ...(trees ? buffersOf(trees) : []),
+        ...(single.arrays ? Object.values(single.arrays).map((a) => a.buffer) : []),
+      ],
     );
+  }
+
+  /**
+   * Arbres isolés de la vue (plus 250 m) : demandés à TreeStore, posés en 3D, et rendus en tableaux Mercator pour le
+   * worker. À partir du zoom 15 seulement : plus loin, un houppier tient dans une cellule de calcul.
+   */
+  _singleTrees([vx0, vy0, vx1, vy1], gx0, gx1) {
+    if (!this.options.trees || this.map.getZoom() < TREES_MIN_ZOOM) {
+      this._setTreeFeatures(null);
+      return { arrays: null, loading: false, failed: false };
+    }
+    const [w, n] = mercatorToLngLat(vx0, vy0);
+    const [e, s] = mercatorToLngLat(vx1, vy1);
+    const dLat = TREES_MARGIN_M / 111320;
+    const dLng = dLat / Math.cos((((n + s) / 2) * Math.PI) / 180);
+    const res = this.trees.request([w - dLng, s - dLat, e + dLng, n + dLat]);
+    if (res.key !== this._treesKey) this._setTreeFeatures(res.trees, res.key, res.paris);
+    const count = res.trees.length / 4;
+    const arrays = { x: new Float64Array(count), y: new Float64Array(count), h: new Float32Array(count), d: new Float32Array(count) };
+    for (let i = 0; i < count; i++) {
+      let [mx, my] = lngLatToMercator(res.trees[4 * i], res.trees[4 * i + 1]);
+      if (gx0 < 0 && mx > gx1) mx -= 1;
+      else if (gx1 > 1 && mx < gx0) mx += 1;
+      arrays.x[i] = mx;
+      arrays.y[i] = my;
+      arrays.h[i] = res.trees[4 * i + 2];
+      arrays.d[i] = res.trees[4 * i + 3];
+    }
+    return { arrays: count ? arrays : null, loading: res.loading, failed: res.failed };
+  }
+
+  _setTreeFeatures(list, key = null, paris = false) {
+    if (!list && this._treesKey == null) return;
+    this._treesKey = key;
+    this._treesFC = list && list.length ? treeFeatures(list) : EMPTY_FC;
+    const src = this.map.getSource('ombres-trees');
+    if (src && paris !== this._treesParis) {
+      // Le crédit d'une source est lu à sa création : on la recrée quand des arbres de la Ville entrent ou sortent.
+      this._treesParis = paris;
+      this.map.removeLayer('ombres-trees-3d');
+      this.map.removeSource('ombres-trees');
+      this._addTreesLayer();
+    } else if (src) {
+      src.setData(this._treesFC);
+    }
+  }
+
+  /** Arbres isolés en volume : tronc et houppier arrondi, éclairés comme les bâtiments par la lumière du soleil. */
+  _addTreesLayer() {
+    const map = this.map;
+    if (!map.getSource('ombres-trees')) {
+      const attribution = TREES_ATTRIBUTION[this._treesParis ? 'paris' : 'osm'];
+      map.addSource('ombres-trees', { type: 'geojson', data: this._treesFC, attribution, tolerance: 0.05, buffer: 16 });
+    }
+    if (!map.getLayer('ombres-trees-3d')) {
+      map.addLayer(
+        {
+          id: 'ombres-trees-3d',
+          type: 'fill-extrusion',
+          source: 'ombres-trees',
+          minzoom: TREES_MIN_ZOOM - 0.5,
+          paint: {
+            'fill-extrusion-color': ['match', ['get', 'k'], 0, '#7a6550', this.options.style === 'satellite' ? '#5d8a4c' : '#78a75e'],
+            'fill-extrusion-base': ['get', 'b'],
+            'fill-extrusion-height': ['get', 't'],
+            'fill-extrusion-opacity': this._treesOpacity(),
+          },
+        },
+        map.getLayer(this._firstSymbol) ? this._firstSymbol : undefined,
+      );
+    }
+  }
+
+  /** De nouveaux arbres sont arrivés (ou un serveur a échoué) : on recalcule, groupé sur 300 ms. */
+  _onTreesUpdate() {
+    if (!this.options.trees) return;
+    clearTimeout(this._treesTimer);
+    this._treesTimer = setTimeout(() => this._scheduleHeightfield(true), 300);
+  }
+
+  _treesOpacity() {
+    return this.options.trees && this.options.buildings3d ? 0.95 : 0;
   }
 
   /**
@@ -737,11 +844,13 @@ export class ShadowMap {
     if (this.map.getLayer('ombres-buildings-3d')) {
       this.map.setPaintProperty('ombres-buildings-3d', 'fill-extrusion-opacity', v ? 0.9 : 0);
     }
+    if (this.map.getLayer('ombres-trees-3d')) this.map.setPaintProperty('ombres-trees-3d', 'fill-extrusion-opacity', this._treesOpacity());
   }
 
-  /** Ombres des bois : le champ de hauteurs est recalculé avec ou sans eux. */
+  /** Bois et arbres isolés : le champ de hauteurs est recalculé avec ou sans eux. */
   setTrees(v) {
     this.options.trees = v;
+    if (this.map.getLayer('ombres-trees-3d')) this.map.setPaintProperty('ombres-trees-3d', 'fill-extrusion-opacity', this._treesOpacity());
     this._scheduleHeightfield(true);
   }
 

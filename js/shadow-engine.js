@@ -407,6 +407,148 @@ export function sweepShadows(H, w, h, azimuth, altitude, cellMeters, depth, rowS
   return depth;
 }
 
+const MAX_TREE_SHADOW = 400; // m : soleil très bas, l'ombre d'un arbre est coupée là (elle se perd dans celles du relief)
+
+/**
+ * Ombres des arbres isolés, ajoutées à `depth` après le balayage. Chaque houppier est un ellipsoïde en l'air (rayon r,
+ * demi-hauteur rv, centre à cz m) : une cellule est à l'ombre si le rayon qui part de sa surface (H) vers le soleil le
+ * traverse. L'ombre se détache donc du pied de l'arbre quand le soleil baisse (le tronc n'en porte pas).
+ * trees = { n, gx, gy (cellules), cz, r, rv, base (sol au pied, m) }. On ne parcourt que la bande, large comme le
+ * houppier, qui va du houppier au bout de son ombre sur un sol 5 m plus bas que le pied (400 m au plus).
+ */
+export function castTreeShadows(depth, H, w, h, trees, azimuth, altitude, cellMeters, rowScale = null) {
+  if (!trees || !trees.n || altitude <= 0) return depth;
+  const az = azimuth * RAD;
+  const ux = Math.sin(az); // vers le soleil, x vers l'est
+  const uy = -Math.cos(az); // vers le soleil, y vers le sud
+  const cosA = Math.cos(altitude * RAD);
+  const sinA = Math.sin(altitude * RAD);
+  const tanA = sinA / cosA;
+  for (let t = 0; t < trees.n; t++) {
+    const gx = trees.gx[t];
+    const gy = trees.gy[t];
+    const cz = trees.cz[t];
+    const r = trees.r[t];
+    const top = cz + trees.rv[t];
+    const cm = cellMeters * (rowScale ? rowScale[Math.min(h - 1, Math.max(0, Math.floor(gy)))] : 1);
+    // Hauteurs multipliées par k = r / rv : le houppier devient une sphère de rayon r, le rayon de soleil (sx, sy, sz).
+    const k = r / trees.rv[t];
+    let sx = cosA * ux;
+    let sy = cosA * uy;
+    let sz = sinA * k;
+    const sn = Math.hypot(sx, sy, sz);
+    sx /= sn;
+    sy /= sn;
+    sz /= sn;
+    // Bande de l'ombre, en mètres depuis le tronc : s le long de l'ombre (à l'opposé du soleil), de −r (bord du
+    // houppier côté soleil) au bout de l'ellipse d'ombre la plus lointaine (centre, plus demi-grand axe r / sz) ;
+    // q en travers, à ±r. Une cellule de marge partout.
+    const sMin = -r - cm;
+    const sMax = Math.min(MAX_TREE_SHADOW, (cz - trees.base[t] + 5) / tanA + r / sz) + cm;
+    const qMax = r + cm;
+    let yLo = Infinity;
+    let yHi = -Infinity;
+    for (const bs of [sMin, sMax]) {
+      for (const bq of [-qMax, qMax]) {
+        const y = -bs * uy + bq * ux; // point s·(−u) + q·v, v = (−uy, ux)
+        if (y < yLo) yLo = y;
+        if (y > yHi) yHi = y;
+      }
+    }
+    const r2 = r * r;
+    const iy0 = Math.max(0, Math.floor(gy + yLo / cm));
+    const iy1 = Math.min(h - 1, Math.floor(gy + yHi / cm));
+    for (let iy = iy0; iy <= iy1; iy++) {
+      const dy = (iy + 0.5 - gy) * cm;
+      // Sur cette ligne : ux·dx ∈ [−sMax − uy·dy, −sMin − uy·dy] et −uy·dx ∈ [−qMax − ux·dy, qMax − ux·dy].
+      let lo = -Infinity;
+      let hi = Infinity;
+      const a0 = -sMax - uy * dy;
+      const a1 = -sMin - uy * dy;
+      if (Math.abs(ux) < 1e-9) {
+        if (a0 > 0 || a1 < 0) continue;
+      } else {
+        lo = Math.min(a0 / ux, a1 / ux);
+        hi = Math.max(a0 / ux, a1 / ux);
+      }
+      const b0 = -qMax - ux * dy;
+      const b1 = qMax - ux * dy;
+      if (Math.abs(uy) < 1e-9) {
+        if (b0 > 0 || b1 < 0) continue;
+      } else {
+        lo = Math.max(lo, Math.min(-b0 / uy, -b1 / uy));
+        hi = Math.min(hi, Math.max(-b0 / uy, -b1 / uy));
+      }
+      if (lo > hi) continue;
+      const ix0 = Math.max(0, Math.floor(gx + lo / cm));
+      const ix1 = Math.min(w - 1, Math.floor(gx + hi / cm));
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const i = iy * w + ix;
+        const zp = H[i];
+        if (zp >= top) continue;
+        const dx = (ix + 0.5 - gx) * cm;
+        const dz = k * (cz - zp);
+        const proj = -dx * sx - dy * sy + dz * sz; // du point vers le centre du houppier, le long du rayon
+        if (proj <= 0) continue;
+        if (dx * dx + dy * dy + dz * dz - proj * proj < r2 && top - zp > depth[i]) depth[i] = top - zp;
+      }
+    }
+  }
+  return depth;
+}
+
+/**
+ * Arbres isolés autour d'un point (voir pointExposure) : écarts en mètres (est, nord) et hauteur du centre du
+ * houppier au-dessus de l'œil (z0), rangés par tranches d'azimut d'un degré : à chaque instant, seuls ceux qui sont
+ * dans la direction du soleil sont testés. `under` : le point est sous un houppier.
+ */
+export function treesAround(trees, gx, gy, z0, cellMeters, maxDist = 500) {
+  const list = [];
+  const bins = Array.from({ length: 360 }, () => []);
+  let under = false;
+  for (let t = 0; t < trees.n; t++) {
+    const dx = (trees.gx[t] - gx) * cellMeters;
+    const dy = (gy - trees.gy[t]) * cellMeters;
+    const dist = Math.hypot(dx, dy);
+    const r = trees.r[t];
+    const rv = trees.rv[t];
+    const dz = trees.cz[t] - z0;
+    if (dist > maxDist || dz + rv <= 0) continue;
+    if (dist < r) under = true;
+    const j = list.length;
+    list.push({
+      dx, dy, dz, r, rv,
+      maxAlt: Math.atan2(dz + rv, Math.max(0.01, dist - r)) / RAD, // au-dessus, le soleil passe par-dessus la cime
+      minAlt: Math.atan2(dz - rv, dist + r) / RAD, // au-dessous, il passe sous le houppier
+    });
+    const half = dist <= r ? 180 : Math.asin(r / dist) / RAD + 1;
+    const az = (Math.atan2(dx, dy) / RAD + 360) % 360;
+    const lo = Math.floor(az - half);
+    for (let b = lo; b <= Math.floor(az + half) && b < lo + 360; b++) bins[((b % 360) + 360) % 360].push(j);
+  }
+  return { list, bins, under };
+}
+
+/** Un des arbres de `near` (treesAround) cache-t-il le soleil ? */
+export function treeBlocksSun(near, azimuth, altitude) {
+  const bin = near.bins[((Math.floor(azimuth) % 360) + 360) % 360];
+  if (!bin.length) return false;
+  const cosA = Math.cos(altitude * RAD);
+  const sinA = Math.sin(altitude * RAD);
+  const ex = cosA * Math.sin(azimuth * RAD);
+  const ny = cosA * Math.cos(azimuth * RAD);
+  for (const j of bin) {
+    const t = near.list[j];
+    if (altitude > t.maxAlt || altitude < t.minAlt) continue;
+    const k = t.r / t.rv;
+    const sz = sinA * k;
+    const dz = k * t.dz;
+    const proj = (t.dx * ex + t.dy * ny + dz * sz) / Math.hypot(cosA, sz);
+    if (proj > 0 && t.dx * t.dx + t.dy * t.dy + dz * dz - proj * proj < t.r * t.r) return true;
+  }
+  return false;
+}
+
 /**
  * Convertit la profondeur d'ombre en image RGBA.
  * style = { shadow: [r,g,b,a], night: [r,g,b,a], soft: boolean }
@@ -446,7 +588,8 @@ export function depthToRGBA(depth, w, h, out, style) {
  * samples = [{ azimuth, altitude }, …] ; retourne Uint8Array (1 = éclairé, 0 = à l'ombre / nuit).
  * @param {number} eyeHeight hauteur (m) au-dessus de la surface locale (ex. 1,5 m pour une personne)
  * @param {object} [opts] { base } : surface (m) sous le point si ce n'est pas H (un point dans un bois est au sol) ;
- *   { horizon } : horizon lointain au-delà de la grille (voir horizonProfile), le soleil doit passer au-dessus
+ *   { horizon } : horizon lointain au-delà de la grille (voir horizonProfile), le soleil doit passer au-dessus ;
+ *   { trees } : arbres isolés autour du point (treesAround), leurs houppiers arrêtent le soleil
  */
 export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 0, rowScale = null, opts = {}) {
   const out = new Uint8Array(samples.length);
@@ -498,6 +641,7 @@ export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 
       py += sy;
       dist += stepMeters;
     }
+    if (lit && opts.trees && treeBlocksSun(opts.trees, azimuth, altitude)) lit = 0;
     out[s] = lit;
   }
   return out;
@@ -656,11 +800,12 @@ export function sunIsUp(sun) {
  * affleure l'horizon) puis masque jour/nuit cellule par cellule quand les paramètres solaires sont fournis.
  * Les deux étapes partagent la même définition du soleil levé, pour éviter tout éclair au lever/coucher.
  */
-export function renderShadows(H, grid, sun, cellMeters, rowScale, depth, T = null) {
+export function renderShadows(H, grid, sun, cellMeters, rowScale, depth, T = null, trees = null) {
   const { w, h } = grid;
   const up = sunIsUp(sun);
   const altitude = up ? Math.max(sun.altitude, 0.05) : Math.min(sun.altitude, 0);
   sweepShadows(H, w, h, sun.azimuth, altitude, cellMeters, depth, rowScale, T);
+  if (up && trees) castTreeShadows(depth, H, w, h, trees, sun.azimuth, altitude, cellMeters, rowScale);
   if (Number.isFinite(sun.declination) && Number.isFinite(sun.minutesUTC)) applyNightMask(depth, grid, sun, up);
   return depth;
 }

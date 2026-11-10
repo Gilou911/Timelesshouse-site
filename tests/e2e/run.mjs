@@ -37,6 +37,9 @@ async function openPage({ viewport, hash, mobile = false, planStyle, satelliteSt
   page.on('console', (msg) => {
     if (msg.type() === 'error' && !/glyph|font|favicon/i.test(msg.text())) consoleErrors.push(`console: ${msg.text()}`);
   });
+  page.on('request', (r) => {
+    if (/opendata\.paris\.fr|overpass-api\.de/.test(r.url())) consoleErrors.push(`requête vers un vrai serveur d'arbres : ${r.url()}`);
+  });
   await page.addInitScript(
     ({ b, planStyle, satelliteStyle, config }) => {
       window.OMBRES_CONFIG = {
@@ -44,6 +47,9 @@ async function openPage({ viewport, hash, mobile = false, planStyle, satelliteSt
         planStyle: planStyle || `${b}/mock/style.json`,
         satelliteStyle: satelliteStyle || `${b}/mock/style.json`,
         openFreeMap: b,
+        // Arbres isolés : serveurs factices, jamais les vrais (Ville de Paris, Overpass).
+        parisTreesUrl: `${b}/mock/paris-trees`,
+        overpassUrl: `${b}/mock/overpass`,
         ...config,
       };
     },
@@ -625,7 +631,8 @@ await scenario('Point 3 : arbres, année, façades 3D, vidéo', async () => {
   const { page, context } = await openPage({ viewport: { width: 1280, height: 800 }, hash: '#48.8566/2.36175/16?d=2026-11-10&t=15:00' });
   const { stats } = await waitForFrame(page, 1);
   assert.ok(stats.wooded > 0.01, `bois rasterisé : ${JSON.stringify(stats)}`);
-  assert.match(await page.textContent('#status'), /bois\u00a0\d+\u00a0%/);
+  // Les arbres isolés arrivent après le premier calcul et en relancent un : on attend qu'il soit fini.
+  await page.waitForFunction(() => /bois\u00a0\d+\u00a0%/.test(document.getElementById('status').textContent) && !window.__ombres.stats.treesLoading, null, { timeout: 30000 });
   await page.waitForTimeout(400);
   const withTrees = await overlayCoverage(page);
   // Un point au milieu du bois est mesuré au sol, sous les arbres.
@@ -705,6 +712,59 @@ await scenario('Point 3 : arbres, année, façades 3D, vidéo', async () => {
   assert.match(video.text, /^Télécharger · (MP4|WEBM), \d+,\d\u00a0Mo$/);
   assert.match(await page.textContent('#status'), /^Vidéo prête/);
   console.log(`   vidéo : ${video.type}, ${(video.size / 1e6).toFixed(2)} Mo, ${overlay.w} × ${overlay.h}`);
+  await context.close();
+});
+
+await scenario('Arbres isolés : Ville de Paris et OpenStreetMap, volumes 3D, ombres rondes', async () => {
+  // Juin, 14 h : soleil au sud-ouest à 58°. Vue sur les arbres factices, entre le damier et le bois.
+  const { page, context } = await openPage({ viewport: { width: 1280, height: 800 }, hash: '#48.8566/2.35950/17?d=2026-06-21&t=14:00' });
+  await waitForFrame(page, 1);
+  // 5 arbres de la Ville, 2 d'OpenStreetMap (le 3e est un doublon), 14 dans l'alignement de 104 m.
+  await page.waitForFunction(() => window.__ombres.stats && window.__ombres.stats.trees === 21 && !window.__ombres.stats.treesLoading, null, { timeout: 30000 });
+  assert.match(await page.textContent('#status'), /21\u00a0arbres/);
+  const fc = await page.evaluate(() => {
+    const sm = window.__ombres.shadowMap;
+    return { n: sm._treesFC.features.length, op: sm.map.getPaintProperty('ombres-trees-3d', 'fill-extrusion-opacity'), attrib: document.querySelector('.maplibregl-ctrl-attrib-inner').textContent };
+  });
+  assert.equal(fc.n, 21 * 6);
+  assert.equal(fc.op, 0.95);
+  assert.match(fc.attrib, /Arbres : Ville de Paris, OpenStreetMap/);
+  // Ombre d'un arbre de 15 m : son centre est à 6 m au nord-est du tronc (à l'opposé du soleil).
+  const alphaAt = (east, north) => page.evaluate(([e, n]) => {
+    const sm = window.__ombres.shadowMap;
+    const g = sm.grids.get(sm.currentGridId);
+    const lat = 48.8566 + n / 111320;
+    const lng = 2.3522 + e / (111320 * Math.cos((48.8566 * Math.PI) / 180));
+    const x = (lng + 180) / 360;
+    const phi = (lat * Math.PI) / 180;
+    const y = (1 - Math.log(Math.tan(phi) + 1 / Math.cos(phi)) / Math.PI) / 2;
+    const px = Math.floor((x - g.originX) / g.cellUnits);
+    const py = Math.floor((y - g.originY) / g.cellUnits);
+    return sm.ctx.getImageData(px, py, 1, 1).data[3];
+  }, [east, north]);
+  await page.waitForTimeout(400);
+  const sun = await page.evaluate(() => window.__ombres.shadowMap.sun);
+  const len = (4.5 + 15) / 2 / Math.tan((sun.altitude * Math.PI) / 180);
+  const away = ((sun.azimuth + 180) * Math.PI) / 180;
+  const shadow = [520 + len * Math.sin(away), len * Math.cos(away)];
+  assert.ok(await alphaAt(...shadow) > 0, `ombre de l'arbre en ${shadow.map((v) => v.toFixed(1))}`);
+  assert.equal(await alphaAt(520 - len * Math.sin(away), -len * Math.cos(away)), 0, 'côté soleil : rien');
+  await page.screenshot({ path: join(OUT, 'arbres-isoles.png') });
+  // Un point sous un houppier est « sous les arbres ».
+  const pt = await page.evaluate(() => {
+    const p = window.__ombres.shadowMap.map.project([2.3522 + 520 / (111320 * Math.cos((48.8566 * Math.PI) / 180)), 48.8566 - 50 / 111320]);
+    return [p.x, p.y];
+  });
+  await page.mouse.click(pt[0], pt[1]);
+  await page.waitForFunction(() => /sous les arbres/.test(document.getElementById('exposure-meta').textContent), null, { timeout: 15000 });
+  // Sans les arbres : plus de volumes, plus d'ombre ronde.
+  const frames = await page.evaluate(() => window.__ombres.frames);
+  await page.click('label:has(#toggle-trees)');
+  await page.waitForFunction((n) => window.__ombres.stats.trees === 0 && window.__ombres.frames > n, frames, { timeout: 30000 });
+  await page.waitForTimeout(400);
+  assert.equal(await alphaAt(...shadow), 0);
+  assert.equal(await page.evaluate(() => window.__ombres.shadowMap._treesFC.features.length), 0);
+  assert.doesNotMatch(await page.textContent('#status'), /arbres/);
   await context.close();
 });
 
