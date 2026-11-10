@@ -64,6 +64,30 @@ function buildingHeight(p) {
 const treeHeight = (p) => (p.class === 'wood' ? CANOPY_HEIGHT : 0);
 const buffersOf = (p) => [p.coords.buffer, p.ringStart.buffer, p.polyStart.buffer, p.heights.buffer];
 
+// Lumière des bâtiments 3D quand le soleil est passé sous l'horizon de plus de 6° : faible et bleutée, venue du ciel.
+const NIGHT_LIGHT = [90, 98, 132];
+const NO_TRANSITION = { duration: 0, delay: 0 }; // la lumière suit le curseur sans traîner derrière les ombres
+
+/**
+ * Lumière de MapLibre pour les bâtiments 3D : elle vient du soleil. Ancre « map » : 0° = nord, sens horaire ; angle
+ * polaire = 90° − élévation. Les façades tournées vers le soleil sont claires, les autres sombres. Du coucher à −6°, la
+ * lumière s'assombrit et monte au zénith : la nuit, plus aucun mur n'est éclairé par le soleil, seul un faible ciel
+ * bleuté garde les toits un peu plus clairs que les murs, pour qu'on lise encore les volumes.
+ */
+export function sunLight(azimuth, altitude) {
+  const t = Math.min(1, Math.max(0, -altitude / 6)); // 0 : soleil levé ; 1 : nuit
+  const c = NIGHT_LIGHT.map((v) => Math.round(255 + (v - 255) * t));
+  return {
+    anchor: 'map',
+    position: [1.15, ((azimuth % 360) + 360) % 360, (90 - Math.min(90, Math.max(0, altitude))) * (1 - t)],
+    color: `rgb(${c.join(', ')})`,
+    intensity: 0.6 - 0.25 * t,
+    'position-transition': NO_TRANSITION,
+    'color-transition': NO_TRANSITION,
+    'intensity-transition': NO_TRANSITION,
+  };
+}
+
 /** Gère la carte, la couche d'ombres et le tracé du soleil. */
 export class ShadowMap {
   constructor(container, options) {
@@ -359,6 +383,8 @@ export class ShadowMap {
     }
 
     map.setTerrain(this.options.terrain ? { source: 'dem', exaggeration: 1 } : null);
+    this._lightKey = null; // le nouveau style a sa propre lumière
+    this._applyLight();
     this._scheduleHeightfield(true);
     this.emit('styleload');
   }
@@ -671,7 +697,21 @@ export class ShadowMap {
    */
   setSun(azimuth, altitude, extra = {}) {
     this.sun = { azimuth, altitude, ...extra };
+    this._applyLight();
     this._requestRender();
+  }
+
+  /** Les bâtiments 3D sont éclairés depuis la position du soleil (au dixième de degré près). */
+  _applyLight() {
+    const { azimuth, altitude } = this.sun;
+    const key = `${azimuth.toFixed(1)}/${altitude.toFixed(1)}`;
+    if (key === this._lightKey) return;
+    try {
+      this.map.setLight(sunLight(azimuth, altitude));
+      this._lightKey = key;
+    } catch {
+      // style en cours de chargement : la lumière sera posée à « style.load »
+    }
   }
 
   setOpacity(opacity) {

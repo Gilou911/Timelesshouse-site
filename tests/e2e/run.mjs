@@ -662,6 +662,20 @@ await scenario('Point 3 : arbres', async () => {
   await page.click('label:has(#toggle-trees)');
   await page.waitForFunction(() => document.getElementById('year-months').textContent.startsWith('Aucun soleil'), null, { timeout: 40000 });
   assert.equal(await yearTotal(), 0);
+
+  // Façades 3D : la lumière de MapLibre vient du soleil ; la nuit, faible, du zénith.
+  const light = () => page.evaluate(() => ({ l: window.__ombres.shadowMap.map.getLight(), sun: window.__ombres.shadowMap.sun }));
+  await page.evaluate(() => window.__ombres.shadowMap.map.jumpTo({ center: [2.3522, 48.8566], zoom: 16.5, pitch: 60, bearing: -20 }));
+  await setTime(page, 15 * 60);
+  const day = await light();
+  assert.equal(day.l.anchor, 'map');
+  assert.ok(Math.abs(day.l.position[1] - day.sun.azimuth) < 0.2 && Math.abs(day.l.position[2] - (90 - day.sun.altitude)) < 0.2, JSON.stringify(day));
+  assert.equal(day.l.intensity, 0.6);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: join(OUT, 'facades-3d.png') });
+  await setTime(page, 23 * 60);
+  const night = await light();
+  assert.deepEqual([night.l.position[2], night.l.intensity], [0, 0.35], JSON.stringify(night.l));
   await context.close();
 });
 

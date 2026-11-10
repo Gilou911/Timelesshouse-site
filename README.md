@@ -24,7 +24,10 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
   - **Lune** : phase, part éclairée, lever, coucher, direction et hauteur à l'heure choisie.
   - **Carnet de lieux** : lieux nommés gardés dans le navigateur (vue, point, façade, cérémonie, date), rouverts d'un
     geste, aussi depuis le champ de recherche vide.
-- Bâtiments 3D, relief 3D, fond plan ou satellite, intensité des ombres réglable.
+- Bâtiments 3D éclairés par le soleil : la lumière suit son azimut et sa hauteur, les façades tournées vers lui sont
+  claires, les autres sombres ; après le coucher, plus aucun mur n'est éclairé (un faible ciel bleuté garde les volumes
+  lisibles).
+- Relief 3D, fond plan ou satellite, intensité des ombres réglable.
 - Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (vue, date, heure, couches, arbres, mode, intensité,
   point, cérémonie, façade, hauteur du point).
 - Fuseau horaire détecté automatiquement d'après l'endroit affiché.
@@ -175,7 +178,9 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    doit passer au-dessus. Le jour : un instant toutes les 5 minutes. L'année : toutes les 10 minutes, 365 jours, à l'heure
    civile (changements d'heure compris), soit 52 560 instants calculés en quelques dizaines de millisecondes.
 6. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
-   Le relief et les bâtiments 3D sont des couches MapLibre classiques.
+   Le relief et les bâtiments 3D sont des couches MapLibre classiques. La lumière des bâtiments 3D (`map.setLight`, ancre
+   « carte ») est placée à l'azimut et à la hauteur du soleil, sans transition ; du coucher à −6°, elle s'assombrit et
+   monte au zénith (`sunLight`, `js/map.js`).
 
 ## Sources de données et crédits
 
@@ -209,6 +214,10 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
   revanche dans les heures de soleil d'un point et d'une façade).
 - La façade est lue sur les emprises de bâtiments de la carte : un mur absent d'OpenStreetMap ne sera pas trouvé, et
   l'orientation se règle alors à la main.
+- En 3D, l'éclairage d'une façade ne dépend que de son orientation : un mur tourné vers le soleil reste clair même à
+  l'ombre d'un autre bâtiment ou du relief (l'ombre se voit au sol, pas sur le mur). Les tuiles regroupent les bâtiments
+  en gros blocs (jusqu'à des centaines par objet) : on ne peut pas en assombrir un seul. De vraies ombres portées sur
+  les murs demanderaient une couche WebGL sur mesure.
 - Le carnet de lieux reste dans le navigateur où il a été rempli : il ne passe pas d'un appareil à l'autre.
 - À l'échelle d'un pays ou d'un continent, la direction du soleil est celle du centre de la carte ; seule la limite
   jour/nuit (terminateur) est calculée point par point.
