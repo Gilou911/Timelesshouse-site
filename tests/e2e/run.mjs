@@ -80,12 +80,15 @@ function overlayCoverage(page) {
 }
 
 async function setTime(page, minutes) {
-  await page.evaluate((m) => {
+  // Compteur relevé dans le même appel, juste avant l'événement : relu après coup, il pouvait déjà compter l'image
+  // demandée, et le test attendait en vain la suivante (« Point 3 » en échec une fois sur quatre, le 10/11/2026).
+  const before = await page.evaluate((m) => {
+    const frames = window.__ombres.frames;
     const el = document.getElementById('time');
     el.value = String(m);
     el.dispatchEvent(new Event('input', { bubbles: true }));
+    return frames;
   }, minutes);
-  const before = await page.evaluate(() => window.__ombres.frames);
   await page.waitForFunction((n) => window.__ombres.frames > n, before, { timeout: 20000 });
   // Laisser le rendu se stabiliser (frames coalescées).
   await page.waitForTimeout(300);
