@@ -159,6 +159,17 @@
     </section>
 
     <section class="card">
+      <h2>Vidéo</h2>
+      <p class="hint">Filmez la carte pendant que l'heure défile, avec l'heure et la date incrustées. La pause arrête l'enregistrement ; il s'arrête de lui-même après 24 heures de journée.</p>
+      <div class="video-actions">
+        <button type="button" id="record" class="btn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 10.5l6-3.5v10l-6-3.5z" fill="currentColor"/></svg><span><span id="record-label">Enregistrer</span><span id="record-time" aria-hidden="true"></span></span></button>
+        <a id="video-link" class="btn" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="video-link-label">Télécharger</span></a>
+      </div>
+      <p class="error" id="record-error" role="alert" hidden></p>
+      <p class="hint" id="record-unsupported" hidden>Ce navigateur ne sait pas enregistrer de vidéo.</p>
+    </section>
+
+    <section class="card">
       <div class="row">
         <button type="button" id="share" class="btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Copier le lien</button>
         <span id="share-ok" class="ok" hidden>Lien copié</span>

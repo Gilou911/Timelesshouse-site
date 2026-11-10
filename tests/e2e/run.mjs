@@ -617,7 +617,7 @@ await scenario('Repérage : frise, lune, cérémonie et repérage, façade, haut
   await context.close();
 });
 
-await scenario('Point 3 : arbres', async () => {
+await scenario('Point 3 : arbres, année, façades 3D, vidéo', async () => {
   // Vue centrée sur le bois factice, à 700 m à l'est de la tour (le damier d'immeubles est hors champ).
   const { page, context } = await openPage({ viewport: { width: 1280, height: 800 }, hash: '#48.8566/2.36175/16?d=2026-11-10&t=15:00' });
   const { stats } = await waitForFrame(page, 1);
@@ -676,6 +676,32 @@ await scenario('Point 3 : arbres', async () => {
   await setTime(page, 23 * 60);
   const night = await light();
   assert.deepEqual([night.l.position[2], night.l.intensity], [0, 0.35], JSON.stringify(night.l));
+
+  // Vidéo : « Enregistrer » lance la lecture et filme la carte, l'heure et la date incrustées ; la pause l'arrête.
+  await setTime(page, 12 * 60);
+  await page.click('#record');
+  await page.waitForFunction(() => window.__ombres.state.playing && /^Arrêter/.test(document.getElementById('record-label').textContent), null, { timeout: 5000 });
+  await page.waitForTimeout(2500);
+  const overlay = await page.evaluate(() => {
+    const c = window.__ombres.recorder.canvas;
+    const d = c.getContext('2d').getImageData(0, Math.round(c.height * 0.6), Math.round(c.width * 0.4), Math.round(c.height * 0.4)).data;
+    let white = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 245 && d[i + 1] > 245 && d[i + 2] > 245) white++;
+    return { white, w: c.width, h: c.height };
+  });
+  assert.ok(overlay.white > 200 && overlay.w % 2 === 0 && overlay.h % 2 === 0, `heure et date incrustées : ${JSON.stringify(overlay)}`);
+  await page.click('#play');
+  await page.waitForSelector('#video-link:not([hidden])', { timeout: 10000 });
+  const video = await page.evaluate(async () => {
+    const a = document.getElementById('video-link');
+    const b = await (await fetch(a.href)).blob();
+    return { size: b.size, type: b.type, name: a.download, text: a.textContent, playing: window.__ombres.state.playing };
+  });
+  assert.ok(video.size > 20000 && /^video\/(mp4|webm)$/.test(video.type) && !video.playing, JSON.stringify(video));
+  assert.match(video.name, /^ombres-2026-11-10\.(mp4|webm)$/);
+  assert.match(video.text, /^Télécharger · (MP4|WEBM), \d+,\d\u00a0Mo$/);
+  assert.match(await page.textContent('#status'), /^Vidéo prête/);
+  console.log(`   vidéo : ${video.type}, ${(video.size / 1e6).toFixed(2)} Mo, ${overlay.w} × ${overlay.h}`);
   await context.close();
 });
 

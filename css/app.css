@@ -298,6 +298,9 @@ body {
 }
 .btn svg { width: 17px; height: 17px; color: var(--accent); }
 .btn.small { padding: 0 12px; white-space: nowrap; }
+.video-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+a.btn { text-decoration: none; }
 .ok { color: var(--text-2); font-size: 0.8125rem; }
 .fineprint { margin: 12px 0 0; font-size: 0.75rem; color: var(--text-2); line-height: 1.5; }
 

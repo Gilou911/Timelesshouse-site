@@ -27,6 +27,9 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 - Bâtiments 3D éclairés par le soleil : la lumière suit son azimut et sa hauteur, les façades tournées vers lui sont
   claires, les autres sombres ; après le coucher, plus aucun mur n'est éclairé (un faible ciel bleuté garde les volumes
   lisibles).
+- **Vidéo** de l'animation : la carte filmée pendant que l'heure défile, l'heure, la date et le crédit des données
+  incrustés, en MP4 si le navigateur sait le faire (Chrome récent, Safari), sinon en WebM ; le fichier est proposé au
+  téléchargement. La pause arrête l'enregistrement, qui s'arrête de lui-même après 24 heures de journée (36 secondes).
 - Relief 3D, fond plan ou satellite, intensité des ombres réglable.
 - Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (vue, date, heure, couches, arbres, mode, intensité,
   point, cérémonie, façade, hauteur du point).
@@ -177,7 +180,12 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    l'élévation apparente du relief jusqu'à 20 km est relevée dans 360 directions, courbure de la Terre comprise ; le soleil
    doit passer au-dessus. Le jour : un instant toutes les 5 minutes. L'année : toutes les 10 minutes, 365 jours, à l'heure
    civile (changements d'heure compris), soit 52 560 instants calculés en quelques dizaines de millisecondes.
-6. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
+6. **Vidéo** (`js/record.js`) : à chaque rendu de MapLibre, l'image est recopiée sur un canvas 2D, dans le même rendu
+   (sans `preserveDrawingBuffer`), qui y incruste l'heure, la date et le crédit des données ; `canvas.captureStream(30)`
+   et `MediaRecorder` en font la vidéo (8 Mb/s, grand côté de 1 920 px au plus, dimensions paires pour H.264).
+   Pas de GIF : il faudrait un encodeur, donc une bibliothèque de plus, et une journée de carte en GIF pèserait des
+   dizaines de Mo pour 256 couleurs.
+7. **Affichage** : l'image RGBA est envoyée à une source `canvas` de MapLibre, géoréférencée sur la grille.
    Le relief et les bâtiments 3D sont des couches MapLibre classiques. La lumière des bâtiments 3D (`map.setLight`, ancre
    « carte ») est placée à l'azimut et à la hauteur du soleil, sans transition ; du coucher à −6°, elle s'assombrit et
    monte au zénith (`sunLight`, `js/map.js`).
@@ -219,6 +227,8 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
   en gros blocs (jusqu'à des centaines par objet) : on ne peut pas en assombrir un seul. De vraies ombres portées sur
   les murs demanderaient une couche WebGL sur mesure.
 - Le carnet de lieux reste dans le navigateur où il a été rempli : il ne passe pas d'un appareil à l'autre.
+- La vidéo est filmée en temps réel : sur un appareil lent, les ombres peuvent avoir une ou deux minutes de retard sur
+  l'heure incrustée. Une journée entière pèse jusqu'à 30 Mo environ en 1 920 px.
 - À l'échelle d'un pays ou d'un continent, la direction du soleil est celle du centre de la carte ; seule la limite
   jour/nuit (terminateur) est calculée point par point.
 - Quand la vue est plus large que le monde, la grille couvre exactement un tour de la Terre et la carte la répète

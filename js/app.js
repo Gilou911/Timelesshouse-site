@@ -9,6 +9,7 @@ import { searchPlace } from './geocode.js';
 import { nearestWall, offsetLngLat, facadeLit, litIntervals } from './facade.js';
 import { moonPosition, moonTimes, moonPhase } from './moon.js';
 import { yearSamples, yearTotals, drawYearChart } from './year.js';
+import { MapRecorder, pickVideoType, longDate } from './record.js';
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -31,6 +32,8 @@ const ui = {
   pointHeight: $('point-height'),
   yearOn: $('year-on'), year: $('year'), yearHours: $('year-hours'), yearLabel: $('year-label'), yearChart: $('year-chart'),
   yearMonths: $('year-months'), yearNote: $('year-note'),
+  record: $('record'), recordLabel: $('record-label'), recordTime: $('record-time'), videoLink: $('video-link'), recordError: $('record-error'),
+  recordUnsupported: $('record-unsupported'), videoLinkLabel: $('video-link-label'),
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -676,12 +679,82 @@ function setPlaying(on) {
     playTimer = setInterval(() => {
       state.minutes = (state.minutes + state.speed) % 1440;
       refreshSun();
+      // Un tour complet de la journée filmé : la vidéo s'arrête d'elle-même.
+      if (recorder && (recordedMinutes += state.speed) >= 1440) setPlaying(false);
     }, 50);
   } else {
     scheduleHash();
+    if (recorder) stopRecording();
   }
 }
 ui.play.addEventListener('click', () => setPlaying(!state.playing));
+
+// ---------- Vidéo de l'animation ----------
+const videoType = typeof MediaRecorder !== 'undefined' && HTMLCanvasElement.prototype.captureStream ? pickVideoType((t) => MediaRecorder.isTypeSupported(t)) : null;
+let recorder = null;
+let recordedMinutes = 0;
+let recordTimer = null;
+let videoUrl = null;
+const fmtClock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+function startRecording() {
+  ui.recordError.hidden = true;
+  const r = new MapRecorder(map, videoType, () => ({ time: formatMinutes(state.minutes), date: longDate(state.date) }));
+  try {
+    r.start();
+  } catch (err) {
+    ui.recordError.textContent = `Enregistrement impossible : ${err.message || err}`;
+    ui.recordError.hidden = false;
+    return;
+  }
+  recorder = r;
+  debug.recorder = r;
+  recordedMinutes = 0;
+  ui.videoLink.hidden = true;
+  ui.recordLabel.textContent = 'Arrêter';
+  setStatus('Enregistrement de la vidéo : la pause l\'arrête.');
+  // Le chrono reste dans le bouton, hors de la ligne d'état qu'un lecteur d'écran lirait à chaque seconde.
+  const t0 = performance.now();
+  const tick = () => (ui.recordTime.textContent = ` · ${fmtClock((performance.now() - t0) / 1000)}`);
+  tick();
+  recordTimer = setInterval(tick, 500);
+  if (!state.playing) setPlaying(true);
+}
+
+async function stopRecording() {
+  const r = recorder;
+  recorder = null;
+  clearInterval(recordTimer);
+  ui.recordLabel.textContent = 'Enregistrer';
+  ui.recordTime.textContent = '';
+  let blob = null;
+  try {
+    blob = await r.stop();
+  } catch {
+    // traité juste dessous, comme une vidéo vide
+  }
+  if (!blob || !blob.size) {
+    ui.recordError.textContent = 'L\'enregistrement a échoué : aucune image n\'a été filmée.';
+    ui.recordError.hidden = false;
+    setStatus('');
+    return;
+  }
+  if (videoUrl) URL.revokeObjectURL(videoUrl);
+  videoUrl = URL.createObjectURL(blob);
+  const ext = blob.type === 'video/mp4' ? 'mp4' : 'webm';
+  const size = `${(blob.size / 1e6).toFixed(1).replace('.', ',')}\u00a0Mo`;
+  ui.videoLink.href = videoUrl;
+  ui.videoLink.download = `ombres-${state.date}.${ext}`;
+  ui.videoLinkLabel.textContent = `Télécharger · ${ext.toUpperCase()}, ${size}`;
+  ui.videoLink.hidden = false;
+  setStatus(`Vidéo prête (${ext.toUpperCase()}, ${size}) : « Télécharger », dans la section Vidéo du panneau.`);
+}
+
+if (!videoType) {
+  ui.record.disabled = true;
+  ui.recordUnsupported.hidden = false;
+}
+ui.record.addEventListener('click', () => (recorder ? setPlaying(false) : startRecording()));
 
 document.addEventListener('keydown', (e) => {
   const active = document.activeElement;
