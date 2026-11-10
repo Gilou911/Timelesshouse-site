@@ -17,7 +17,7 @@ const ui = {
   noon: $('noon'), daylength: $('daylength'), golden: $('golden'), pink: $('pink'), blue: $('blue'), shadowRatio: $('shadow-ratio'),
   exposureHint: $('exposure-hint'), exposure: $('exposure'), exposureHours: $('exposure-hours'), exposureList: $('exposure-list'),
   exposureBar: $('exposure-bar'), exposureMeta: $('exposure-meta'), exposureClear: $('exposure-clear'),
-  toggleShadows: $('toggle-shadows'), toggleBuildings: $('toggle-buildings'), toggleTerrain: $('toggle-terrain'),
+  toggleShadows: $('toggle-shadows'), toggleTrees: $('toggle-trees'), toggleBuildings: $('toggle-buildings'), toggleTerrain: $('toggle-terrain'),
   legend: $('legend'), legendMid: $('legend-mid'), legendMax: $('legend-max'),
   opacity: $('opacity'), share: $('share'), shareOk: $('share-ok'),
   play: $('play'), date: $('date'), timeLabel: $('time-label'), tzLabel: $('tz-label'), now: $('now'), time: $('time'), status: $('status'),
@@ -78,6 +78,7 @@ const state = {
   buildings3d: hash.buildings3d ?? true,
   terrain: hash.terrain ?? false,
   shadows: hash.shadows ?? true,
+  trees: hash.trees ?? true,
   opacity: hash.opacity ?? 0.45,
   point: hash.point || null,
   mode: hash.mode === 'exposure' ? 'exposure' : 'shadows',
@@ -135,6 +136,7 @@ const shadowMap = new ShadowMap('map', {
   buildings3d: state.buildings3d,
   terrain: state.terrain,
   shadows: state.shadows,
+  trees: state.trees,
   opacity: state.opacity,
   mode: state.mode,
   cellBudget: isMobile() ? 600000 : 1200000,
@@ -414,7 +416,8 @@ async function computeExposure() {
   renderFacade();
   const alt = res.elevation != null ? `altitude ${Math.round(res.elevation)} m` : '';
   const roof = res.surface != null && res.elevation != null && res.surface - res.elevation > 1 ? ` · sur un toit (${Math.round(res.surface - res.elevation)} m)` : '';
-  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à ${fmtMeters(state.height)} m ${roof ? 'au-dessus du toit' : 'du sol'}`;
+  const trees = res.underTrees ? ' · sous les arbres' : '';
+  ui.exposureMeta.textContent = `${alt}${roof}${trees} · mesuré à ${fmtMeters(state.height)} m ${roof ? 'au-dessus du toit' : 'du sol'}`;
 }
 
 // Hauteur du point : virgule ou point décimal, ramenée entre 0 et 500 m ; une saisie illisible reprend la valeur d'avant.
@@ -540,6 +543,7 @@ shadowMap.on('heightfield', (stats) => {
   const parts = [];
   parts.push(`relief ${stats.tilesLoaded} tuile${stats.tilesLoaded > 1 ? 's' : ''}${stats.tilesMissing ? ` (${stats.tilesMissing} manquante${stats.tilesMissing > 1 ? 's' : ''})` : ''}`);
   parts.push(`${stats.buildings.toLocaleString('fr-FR')} bâtiment${stats.buildings > 1 ? 's' : ''}`);
+  if (stats.wooded > 0) parts.push(`bois sur ${Math.max(1, Math.round(stats.wooded * 100))} %`);
   setStatus(parts.join(' · '));
   if (state.point) computeExposure();
 });
@@ -625,6 +629,7 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- Couches ----------
 ui.toggleShadows.checked = state.shadows;
+ui.toggleTrees.checked = state.trees;
 ui.toggleBuildings.checked = state.buildings3d;
 ui.toggleTerrain.checked = state.terrain;
 ui.opacity.value = String(state.opacity);
@@ -633,6 +638,11 @@ for (const r of document.querySelectorAll('input[name="style"]')) r.checked = r.
 ui.toggleShadows.addEventListener('change', () => {
   state.shadows = ui.toggleShadows.checked;
   shadowMap.setShadowsVisible(state.shadows);
+  scheduleHash();
+});
+ui.toggleTrees.addEventListener('change', () => {
+  state.trees = ui.toggleTrees.checked;
+  shadowMap.setTrees(state.trees);
   scheduleHash();
 });
 ui.toggleBuildings.addEventListener('change', () => {
@@ -800,6 +810,7 @@ function currentHash() {
     buildings3d: state.buildings3d,
     terrain: state.terrain,
     shadows: state.shadows,
+    trees: state.trees,
     point: state.point,
     mode: state.mode,
     opacity: state.opacity,

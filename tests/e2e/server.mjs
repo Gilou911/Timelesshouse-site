@@ -63,7 +63,17 @@ function buildingsGeoJSON() {
   }
   return { type: 'FeatureCollection', features };
 }
-const tileIndex = new GeoJSONVT(buildingsGeoJSON(), { maxZoom: 14, indexMaxZoom: 14, indexMaxPoints: 0, buffer: 64, extent: 4096 });
+const VT_OPTIONS = { maxZoom: 14, indexMaxZoom: 14, indexMaxPoints: 0, buffer: 64, extent: 4096 };
+const tileIndex = new GeoJSONVT(buildingsGeoJSON(), VT_OPTIONS);
+// Un bois de 200 m de côté à 600 m à l'est de la tour de Paris (hors du damier), et une pelouse de parc à côté, qui ne compte pas.
+const P0 = { lat: 48.8566, lng: 2.3522 };
+const landcoverIndex = new GeoJSONVT({
+  type: 'FeatureCollection',
+  features: [
+    { type: 'Feature', properties: { class: 'wood', subclass: 'forest' }, geometry: { type: 'Polygon', coordinates: rectAround(P0.lat, P0.lng, 700, 0, 200, 200) } },
+    { type: 'Feature', properties: { class: 'grass', subclass: 'park' }, geometry: { type: 'Polygon', coordinates: rectAround(P0.lat, P0.lng, 700, -250, 200, 200) } },
+  ],
+}, VT_OPTIONS);
 
 // ---- Tuile raster factice : fond clair avec grille ----
 const rasterTile = (() => {
@@ -150,7 +160,7 @@ export function startServer(port = 0, { injectConfig = false } = {}) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
         tilejson: '3.0.0', name: 'mock planet', tiles: [`${base}/mock/vec/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14,
-        vector_layers: [{ id: 'building', fields: { render_height: 'Number', render_min_height: 'Number' } }],
+        vector_layers: [{ id: 'building', fields: { render_height: 'Number', render_min_height: 'Number' } }, { id: 'landcover', fields: { class: 'String', subclass: 'String' } }],
         attribution: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> (test)',
       }));
     }
@@ -175,12 +185,16 @@ export function startServer(port = 0, { injectConfig = false } = {}) {
       return res.end(rasterTile);
     }
     if ((m = url.pathname.match(/^\/mock\/vec\/(\d+)\/(\d+)\/(\d+)\.pbf$/))) {
+      const layers = {};
       const tile = tileIndex.getTile(+m[1], +m[2], +m[3]);
-      if (!tile) {
+      const cover = landcoverIndex.getTile(+m[1], +m[2], +m[3]);
+      if (tile) layers.building = tile;
+      if (cover) layers.landcover = cover;
+      if (!tile && !cover) {
         res.writeHead(204);
         return res.end();
       }
-      const buf = fromGeojsonVt({ building: tile }, { version: 2 });
+      const buf = fromGeojsonVt(layers, { version: 2 });
       res.writeHead(200, { 'Content-Type': 'application/x-protobuf' });
       return res.end(Buffer.from(buf));
     }

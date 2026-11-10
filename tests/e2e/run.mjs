@@ -617,6 +617,31 @@ await scenario('Repérage : frise, lune, cérémonie et repérage, façade, haut
   await context.close();
 });
 
+await scenario('Point 3 : arbres', async () => {
+  // Vue centrée sur le bois factice, à 700 m à l'est de la tour (le damier d'immeubles est hors champ).
+  const { page, context } = await openPage({ viewport: { width: 1280, height: 800 }, hash: '#48.8566/2.36175/16?d=2026-11-10&t=15:00' });
+  const { stats } = await waitForFrame(page, 1);
+  assert.ok(stats.wooded > 0.01, `bois rasterisé : ${JSON.stringify(stats)}`);
+  assert.match(await page.textContent('#status'), /bois sur \d+ %/);
+  await page.waitForTimeout(400);
+  const withTrees = await overlayCoverage(page);
+  // Un point au milieu du bois est mesuré au sol, sous les arbres.
+  await page.mouse.click(640, 400);
+  await page.waitForFunction(() => /sous les arbres/.test(document.getElementById('exposure-meta').textContent), null, { timeout: 15000 });
+  await page.screenshot({ path: join(OUT, 'arbres.png') });
+
+  // Sans les arbres : plus de bois dans le calcul, moins d'ombre, et arb=0 dans le lien.
+  const frames = await page.evaluate(() => window.__ombres.frames);
+  await page.click('label:has(#toggle-trees)');
+  await page.waitForFunction((n) => window.__ombres.stats.wooded === 0 && window.__ombres.frames > n, frames, { timeout: 30000 });
+  await page.waitForTimeout(400);
+  const without = await overlayCoverage(page);
+  assert.ok(withTrees.ratio > without.ratio + 0.005, `ombre des arbres : ${withTrees.ratio.toFixed(4)} avec, ${without.ratio.toFixed(4)} sans`);
+  await page.waitForFunction(() => !/sous les arbres/.test(document.getElementById('exposure-meta').textContent) && /mesuré à/.test(document.getElementById('exposure-meta').textContent), null, { timeout: 15000 });
+  await page.waitForFunction(() => /[?&]arb=0/.test(location.hash), null, { timeout: 5000 });
+  await context.close();
+});
+
 await browser.close();
 close();
 if (consoleErrors.length) {

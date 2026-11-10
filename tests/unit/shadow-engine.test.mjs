@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   sweepShadows, rasterizeBuildings, decodeTerrarium, DemMosaic, fillTerrain, depthToRGBA, pointExposure,
   lngLatToMercator, mercatorToLngLat, metersPerUnit, rowScaleFactors, accumulateExposure, exposureToRGBA, exposureColor, applyNightMask, renderShadows, NIGHT,
+  surfaceAt,
 } from '../../js/shadow-engine.js';
 import { sunPosition } from '../../js/sun.js';
 
@@ -356,4 +357,46 @@ test('relief plat (T) : les ombres de bâtiments restent identiques', () => {
   sweepShadows(H, w, h, 213, 27, 1, ref);
   sweepShadows(H, w, h, 213, 27, 1, depth, null, new Float32Array(w * h));
   assert.deepEqual(depth, ref);
+});
+
+test('bois : canopée sur le sol nu seulement, ombre au-delà de la lisière, point mesuré sous les arbres', () => {
+  const w = 40;
+  const h = 50;
+  const g = { w, h, originX: 0, originY: 0, cellUnits: 1 };
+  const T = new Float32Array(w * h);
+  for (let i = 0; i < T.length; i++) T[i] = 200 + (i % w) * 0.5; // relief qui monte vers l'est
+  const H = new Float32Array(T);
+  const square = (x0, y0, x1, y1, height) => ({
+    coords: new Float64Array([x0, y0, x1, y0, x1, y1, x0, y1]), ringStart: Int32Array.of(0, 4), polyStart: Int32Array.of(0, 1), heights: Float32Array.of(height),
+  });
+  rasterizeBuildings(H, T, g, square(8, 24, 12, 28, 6)); // une maison forestière de 6 m, plus basse que les arbres
+  const canopy = new Uint8Array(w * h);
+  const wood = square(5, 20, 25, 35, 15);
+  assert.equal(rasterizeBuildings(H, T, g, wood, canopy), 1);
+  rasterizeBuildings(H, T, g, wood, canopy); // le même bois, en double au bord d'une tuile : sans effet
+  assert.equal(H[30 * w + 20], T[30 * w + 20] + 15, 'canopée posée sur le relief');
+  assert.equal(canopy[30 * w + 20], 1);
+  assert.equal(H[26 * w + 10], T[26 * w + 10] + 6, 'le bâtiment garde sa hauteur, les arbres ne le recouvrent pas');
+  assert.equal(canopy[26 * w + 10], 0, 'un bâtiment n\'est pas boisé');
+  assert.equal(H[40 * w + 20], T[40 * w + 20], 'hors du bois : inchangé');
+  assert.equal(surfaceAt(H, T, canopy, 30 * w + 20), T[30 * w + 20], 'dans le bois, on se tient au sol');
+  assert.equal(surfaceAt(H, T, canopy, 26 * w + 10), H[26 * w + 10], 'sur le bâtiment, on se tient sur le toit');
+  assert.equal(surfaceAt(H, T, null, 30 * w + 20), H[30 * w + 20], 'sans arbres : H');
+
+  // Soleil au sud à 45° : la lisière nord (ligne 20) ombre 14 cellules au nord ; le relief reste T, sans les arbres.
+  const depth = new Float32Array(w * h);
+  sweepShadows(H, w, h, 180, 45, 1, depth, null, T);
+  for (let y = 6; y < 20; y++) assert.ok(depth[y * w + 20] > 0, `ligne ${y}, au nord du bois : ombre`);
+  assert.equal(depth[5 * w + 20], 0, 'au-delà de 15 m : soleil');
+  assert.equal(depth[30 * w + 20], 0, 'le haut de la canopée est au soleil');
+  assert.equal(depth[40 * w + 20], 0, 'au sud du bois : soleil');
+
+  // Un point dans le bois : à l'ombre des arbres voisins, sauf vu d'au-dessus de la canopée (drone).
+  const samples = [{ azimuth: 180, altitude: 45 }, { azimuth: 90, altitude: 30 }];
+  const i = 30 * w + 20;
+  const opts = { base: surfaceAt(H, T, canopy, i) };
+  assert.deepEqual(Array.from(pointExposure(H, w, h, 20.5, 30.5, samples, 1, 1.5, null, opts)), [0, 0], 'sous les arbres');
+  assert.deepEqual(Array.from(pointExposure(H, w, h, 20.5, 30.5, samples, 1, 20, null, opts)), [1, 1], 'drone à 20 m');
+  assert.deepEqual(Array.from(pointExposure(H, w, h, 20.5, 30.5, samples, 1, 1.5)), [1, 1], 'sans base : posé sur la canopée');
+  assert.deepEqual(Array.from(pointExposure(H, w, h, 20.5, 45.5, samples, 1, 1.5)), [1, 1], 'en terrain découvert au sud');
 });

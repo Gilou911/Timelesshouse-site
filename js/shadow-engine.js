@@ -179,9 +179,11 @@ export function fillTerrain(T, grid, mosaic, zoom) {
  * buildings = { coords: Float64Array [x0,y0,x1,y1,…], ringStart: Int32Array (indices de sommets, sentinelle finale),
  *               polyStart: Int32Array (indices d'anneaux, sentinelle finale), heights: Float32Array (par polygone) }
  * Le toit suit le relief (hauteur ajoutée au relief de chaque cellule), sans marche aux bords de tuiles.
+ * `canopy` (Uint8Array w*h, facultatif) : mode arbres. Seul le sol nu (ou un bois déjà posé) est relevé, jamais un
+ * bâtiment, et chaque cellule boisée y est marquée (voir surfaceAt).
  * @returns nombre de polygones ayant touché au moins une cellule
  */
-export function rasterizeBuildings(H, T, grid, buildings) {
+export function rasterizeBuildings(H, T, grid, buildings, canopy = null) {
   const { w, h, originX, originY, cellUnits } = grid;
   const { coords, ringStart, polyStart, heights } = buildings;
   const nPoly = polyStart.length - 1;
@@ -215,6 +217,15 @@ export function rasterizeBuildings(H, T, grid, buildings) {
     cy /= cn;
     const ccx = Math.min(w - 1, Math.max(0, Math.floor(cx)));
     const ccy = Math.min(h - 1, Math.max(0, Math.floor(cy)));
+    const fill = (i) => {
+      if (canopy) {
+        if (H[i] > T[i] && !canopy[i]) return 0;
+        canopy[i] = 1;
+      }
+      const top = T[i] + height;
+      if (top > H[i]) H[i] = top;
+      return 1;
+    };
     // Le toit suit le relief sous l'emprise (hauteur ajoutée cellule par cellule) : un toit plat calé sur le
     // centroïde créerait une marche à chaque bord de tuile vectorielle, où les emprises sont découpées.
     const yStart = Math.max(0, Math.floor(minY));
@@ -244,21 +255,11 @@ export function rasterizeBuildings(H, T, grid, buildings) {
       for (let k = 0; k + 1 < xs.length; k += 2) {
         const xa = Math.max(0, Math.ceil(xs[k] - 0.5));
         const xb = Math.min(w - 1, Math.floor(xs[k + 1] - 0.5));
-        for (let x = xa; x <= xb; x++) {
-          const i = y * w + x;
-          const top = T[i] + height;
-          if (top > H[i]) H[i] = top;
-          filled++;
-        }
+        for (let x = xa; x <= xb; x++) filled += fill(y * w + x);
       }
     }
-    if (filled === 0 && cx >= 0 && cx < w && cy >= 0 && cy < h) {
-      // Bâtiment plus petit qu'une cellule : on marque la cellule du centroïde.
-      const i = ccy * w + ccx;
-      const top = T[i] + height;
-      if (top > H[i]) H[i] = top;
-      filled = 1;
-    }
+    // Bâtiment plus petit qu'une cellule : on marque la cellule du centroïde.
+    if (filled === 0 && cx >= 0 && cx < w && cy >= 0 && cy < h) filled = fill(ccy * w + ccx);
     if (filled) touched++;
   }
   return touched;
@@ -392,12 +393,13 @@ export function depthToRGBA(depth, w, h, out, style) {
  * Ensoleillement d'un point de la grille pour une liste d'instants.
  * samples = [{ azimuth, altitude }, …] ; retourne Uint8Array (1 = éclairé, 0 = à l'ombre / nuit).
  * @param {number} eyeHeight hauteur (m) au-dessus de la surface locale (ex. 1,5 m pour une personne)
+ * @param {object} [opts] { base } : surface (m) sous le point si ce n'est pas H (un point dans un bois est au sol)
  */
-export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 0, rowScale = null) {
+export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 0, rowScale = null, opts = {}) {
   const out = new Uint8Array(samples.length);
   const ix0 = Math.min(w - 1, Math.max(0, Math.floor(gx)));
   const iy0 = Math.min(h - 1, Math.max(0, Math.floor(gy)));
-  const z0 = H[iy0 * w + ix0] + eyeHeight;
+  const z0 = (opts.base ?? H[iy0 * w + ix0]) + eyeHeight;
   if (rowScale) cellMeters *= rowScale[iy0];
   let maxH = -Infinity;
   for (let i = 0; i < H.length; i++) if (H[i] > maxH) maxH = H[i];
@@ -436,6 +438,11 @@ export function pointExposure(H, w, h, gx, gy, samples, cellMeters, eyeHeight = 
     out[s] = lit;
   }
   return out;
+}
+
+/** Surface où se tient un point : le toit d'un bâtiment, mais le sol dans un bois (on y est sous les arbres). */
+export function surfaceAt(H, T, canopy, i) {
+  return canopy && canopy[i] ? T[i] : H[i];
 }
 
 /**

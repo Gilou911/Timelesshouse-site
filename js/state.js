@@ -1,4 +1,4 @@
-// État partageable dans l'URL : #lat/lng/zoom/bearing/pitch?d=YYYY-MM-DD&t=HH:MM&tz=…&style=…&b3d=1&ter=1
+// État partageable dans l'URL : #lat/lng/zoom/bearing/pitch?d=YYYY-MM-DD&t=HH:MM&tz=…&style=…&b3d=1&ter=1&arb=0
 /** Date civile réelle (pas de 31 février), entre 1900 et 2100 : domaine de validité du calcul solaire. */
 export function isValidDateISO(s) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
@@ -38,6 +38,7 @@ export function parseHash(hash) {
   if (q.has('b3d')) out.buildings3d = q.get('b3d') === '1';
   if (q.has('ter')) out.terrain = q.get('ter') === '1';
   if (q.has('sh')) out.shadows = q.get('sh') === '1';
+  if (q.has('arb')) out.trees = q.get('arb') === '1';
   if (q.get('m') === 'exposure') out.mode = 'exposure';
   if (q.has('o')) {
     const o = parseFloat(q.get('o'));
@@ -90,6 +91,7 @@ export function buildHash(st) {
   if (st.buildings3d === false) q.set('b3d', '0');
   if (st.terrain) q.set('ter', '1');
   if (st.shadows === false) q.set('sh', '0');
+  if (st.trees === false) q.set('arb', '0');
   if (st.mode === 'exposure') q.set('m', 'exposure');
   if (Number.isFinite(st.opacity) && Math.abs(st.opacity - 0.45) > 1e-9) q.set('o', r(st.opacity, 2));
   if (st.point) q.set('p', `${r(st.point.lat, 5)},${r(st.point.lng, 5)}`);

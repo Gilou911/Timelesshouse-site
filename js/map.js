@@ -50,6 +50,19 @@ function satelliteStyle() {
 }
 
 const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+// shortcut: une seule hauteur pour tous les bois (OpenStreetMap n'en donne pas), à remplacer par une vraie hauteur de canopée si une source ouverte s'y prête.
+const CANOPY_HEIGHT = 15;
+
+function buildingHeight(p) {
+  if (p.hide_3d === true || p.hide_3d === 'true') return 0;
+  let h = Number(p.render_height);
+  if (!(h > 0)) h = Number(p.height);
+  if (!(h > 0)) h = Number(p['building:levels']) * 3.2;
+  return h > 0 ? h : 6;
+}
+// Bois et forêts (landcover « wood ») seulement : un parc est surtout une pelouse, une haute canopée y ferait de fausses ombres.
+const treeHeight = (p) => (p.class === 'wood' ? CANOPY_HEIGHT : 0);
+const buffersOf = (p) => [p.coords.buffer, p.ringStart.buffer, p.polyStart.buffer, p.heights.buffer];
 
 /** Gère la carte, la couche d'ombres et le tracé du soleil. */
 export class ShadowMap {
@@ -59,6 +72,7 @@ export class ShadowMap {
       buildings3d: true,
       terrain: false,
       shadows: true,
+      trees: true,
       opacity: 0.45,
       mode: 'shadows',
       quality: 1,
@@ -462,7 +476,8 @@ export class ShadowMap {
     const grid = { w, h, originX: x0, originY: y0, cellUnits };
     const cellMeters = cellUnits * metersPerUnit(center.lat);
     const demZoom = Math.max(0, Math.min(15, Math.floor(Math.log2(1 / (cellUnits * 256)))));
-    const buildings = this._collectBuildings(x0, x1);
+    const buildings = this._collectPolygons('building', buildingHeight, x0, x1);
+    const trees = this.options.trees ? this._collectPolygons('landcover', treeHeight, x0, x1) : null;
     const id = ++this.hfId;
     this.grids.set(id, grid);
     for (const k of this.grids.keys()) if (k < id - 2 && k !== this.currentGridId) this.grids.delete(k);
@@ -476,18 +491,22 @@ export class ShadowMap {
         grid,
         demZoom,
         buildings,
+        trees,
         cellMeters,
         latCenter: center.lat,
         useTerrain: this.options.terrainShadows !== false,
         useBuildings: this.options.buildingShadows !== false,
         exposure,
       },
-      [buildings.coords.buffer, buildings.ringStart.buffer, buildings.polyStart.buffer, buildings.heights.buffer],
+      trees ? [...buffersOf(buildings), ...buffersOf(trees)] : buffersOf(buildings),
     );
   }
 
-  /** Extrait les emprises de bâtiments (tuiles vectorielles chargées) en tableaux plats, unités Mercator. */
-  _collectBuildings(gx0 = 0, gx1 = 1) {
+  /**
+   * Extrait les polygones d'une couche des tuiles vectorielles chargées (bâtiments, bois) en tableaux plats, unités
+   * Mercator, avec une hauteur par polygone ; `heightOf(propriétés)` rend 0 pour écarter un objet.
+   */
+  _collectPolygons(sourceLayer, heightOf, gx0 = 0, gx1 = 1) {
     const coords = [];
     const ringStart = [0];
     const polyStart = [0];
@@ -496,17 +515,13 @@ export class ShadowMap {
     if (this.vectorSource && map.getZoom() >= 12.5 && map.getSource(this.vectorSource)) {
       let feats = [];
       try {
-        feats = map.querySourceFeatures(this.vectorSource, { sourceLayer: 'building' });
+        feats = map.querySourceFeatures(this.vectorSource, { sourceLayer });
       } catch {
         feats = [];
       }
       for (const f of feats) {
-        const p = f.properties || {};
-        if (p.hide_3d === true || p.hide_3d === 'true') continue;
-        let h = Number(p.render_height);
-        if (!(h > 0)) h = Number(p.height);
-        if (!(h > 0)) h = Number(p['building:levels']) * 3.2;
-        if (!(h > 0)) h = 6;
+        const h = heightOf(f.properties || {});
+        if (!(h > 0)) continue;
         const geom = f.geometry;
         if (!geom) continue;
         const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.type === 'MultiPolygon' ? geom.coordinates : [];
@@ -682,6 +697,12 @@ export class ShadowMap {
     if (this.map.getLayer('ombres-buildings-3d')) {
       this.map.setPaintProperty('ombres-buildings-3d', 'fill-extrusion-opacity', v ? 0.9 : 0);
     }
+  }
+
+  /** Ombres des bois : le champ de hauteurs est recalculé avec ou sans eux. */
+  setTrees(v) {
+    this.options.trees = v;
+    this._scheduleHeightfield(true);
   }
 
   setTerrain3d(v) {

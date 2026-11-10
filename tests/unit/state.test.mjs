@@ -19,10 +19,12 @@ test('aller-retour de l\'état dans le hash', () => {
   assert.equal(p.terrain, undefined, 'valeur par défaut non encodée');
   assert.equal(p.shadows, undefined);
   assert.ok(!/%3A|%2C/.test(h), `hash lisible : ${h}`);
-  const p2 = parseHash(buildHash({ ...st, buildings3d: false, terrain: true, shadows: false }));
+  const p2 = parseHash(buildHash({ ...st, buildings3d: false, terrain: true, shadows: false, trees: false }));
   assert.equal(p2.buildings3d, false);
   assert.equal(p2.terrain, true);
   assert.equal(p2.shadows, false);
+  assert.equal(p2.trees, false, 'arbres retirés : arb=0');
+  assert.equal(parseHash(buildHash({ ...st, trees: true })).trees, undefined, 'arbres par défaut non encodés');
   const p3 = parseHash(buildHash({ ...st, mode: 'exposure', opacity: 0.7 }));
   assert.equal(p3.mode, 'exposure');
   assert.equal(p3.opacity, 0.7);

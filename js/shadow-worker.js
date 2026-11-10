@@ -2,7 +2,7 @@
 // (relief + bâtiments) et calcule les ombres à la demande.
 import {
   DemMosaic, decodeTerrarium, fillTerrain, rasterizeBuildings, depthToRGBA, pointExposure, rowScaleFactors,
-  exposureToRGBA, renderShadows, sunIsUp,
+  exposureToRGBA, renderShadows, sunIsUp, surfaceAt,
 } from './shadow-engine.js';
 import { canDecodePNG, decodePNG, pngSize } from './png.js';
 
@@ -156,7 +156,7 @@ async function runPool(tasks, limit) {
 
 async function buildHeightfield(msg) {
   const token = ++hfToken;
-  const { id, grid, demZoom, buildings, cellMeters, latCenter, useTerrain, useBuildings } = msg;
+  const { id, grid, demZoom, buildings, trees, cellMeters, latCenter, useTerrain, useBuildings } = msg;
   const { w, h } = grid;
   const T = new Float32Array(w * h);
   let tilesLoaded = 0;
@@ -199,6 +199,15 @@ async function buildHeightfield(msg) {
   if (useBuildings && buildings && buildings.polyStart.length > 1) {
     touched = rasterizeBuildings(H, T, grid, buildings);
   }
+  // Les bois vont dans H, jamais dans T : le balayage lit le relief seul au point exact du rayon (sinon, des stries).
+  let canopy = null;
+  let canopyCells = 0;
+  if (trees && trees.polyStart.length > 1) {
+    canopy = new Uint8Array(w * h);
+    rasterizeBuildings(H, T, grid, trees, canopy);
+    for (let i = 0; i < canopy.length; i++) canopyCells += canopy[i];
+    if (!canopyCells) canopy = null;
+  }
   let minH = Infinity;
   let maxH = -Infinity;
   for (let i = 0; i < H.length; i++) {
@@ -207,11 +216,11 @@ async function buildHeightfield(msg) {
     if (v > maxH) maxH = v;
   }
   const rowScale = Number.isFinite(latCenter) ? rowScaleFactors(grid, latCenter) : null;
-  current = { id, grid, H, T, depth: new Float32Array(w * h), depthValid: false, acc: null, accMaxMinutes: 0, cellMeters, rowScale };
+  current = { id, grid, H, T, canopy, depth: new Float32Array(w * h), depthValid: false, acc: null, accMaxMinutes: 0, cellMeters, rowScale };
   postMessage({
     type: 'heightfield-ready',
     id,
-    stats: { tilesLoaded, tilesMissing, buildings: touched, minH, maxH, w, h, terrainUnsupported },
+    stats: { tilesLoaded, tilesMissing, buildings: touched, wooded: canopyCells / (w * h), minH, maxH, w, h, terrainUnsupported },
   });
   if (mode === 'exposure') {
     // La demande la plus récente l'emporte (une date changée pendant le téléchargement du relief, par exemple).
@@ -346,15 +355,16 @@ function exposure(msg) {
     postMessage({ type: 'exposure-result', requestId: msg.requestId, lit: null, reason: 'outside' });
     return;
   }
-  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, msg.eyeHeight || 0, rowScale);
-  const ix = Math.floor(gx);
-  const iy = Math.floor(gy);
+  const i = Math.floor(gy) * grid.w + Math.floor(gx);
+  const base = surfaceAt(H, current.T, current.canopy, i);
+  const lit = pointExposure(H, grid.w, grid.h, gx, gy, msg.samples, cellMeters, msg.eyeHeight || 0, rowScale, { base });
   postMessage({
     type: 'exposure-result',
     requestId: msg.requestId,
     lit,
-    elevation: current.T[iy * grid.w + ix],
-    surface: H[iy * grid.w + ix],
+    elevation: current.T[i],
+    surface: base,
+    underTrees: !!(current.canopy && current.canopy[i]),
   });
 }
 

@@ -1,11 +1,12 @@
 # Ombres — soleil et ombres sur la carte
 
 Application web statique, dans l'esprit de ShadeMap / Shadowmap : une carte sur laquelle on fait défiler
-l'heure et la date pour voir où tombent les ombres du **relief** et des **bâtiments**, n'importe où dans le monde.
+l'heure et la date pour voir où tombent les ombres du **relief**, des **bâtiments** et des **arbres**, n'importe où dans le monde.
 Pensée pour vivre sur `perso.timelesshouse.org`.
 
 - Curseur d'heure, choix de la date, lecture animée de la journée, bouton « Maintenant ».
-- Ombres calculées pixel par pixel à partir du relief (Terrain Tiles, 30 m ou mieux) et des hauteurs de bâtiments OpenStreetMap.
+- Ombres calculées pixel par pixel à partir du relief (Terrain Tiles, 30 m ou mieux), des hauteurs de bâtiments OpenStreetMap
+  et des bois et forêts (canopée de 15 m), avec un interrupteur « Arbres ».
 - Panneau soleil : azimut, élévation, lever, coucher, midi solaire, durée du jour, heures dorée, rose et bleue, longueur d'ombre.
 - Mode « Heures de soleil » : carte colorée du nombre d'heures de soleil direct reçues en chaque point sur la journée.
 - Clic sur la carte : heures de soleil direct reçues par ce point ce jour-là, avec les créneaux.
@@ -21,8 +22,8 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
   - **Carnet de lieux** : lieux nommés gardés dans le navigateur (vue, point, façade, cérémonie, date), rouverts d'un
     geste, aussi depuis le champ de recherche vide.
 - Bâtiments 3D, relief 3D, fond plan ou satellite, intensité des ombres réglable.
-- Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (vue, date, heure, couches, mode, intensité, point,
-  cérémonie, façade, hauteur du point).
+- Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (vue, date, heure, couches, arbres, mode, intensité,
+  point, cérémonie, façade, hauteur du point).
 - Fuseau horaire détecté automatiquement d'après l'endroit affiché.
 - Sans clé d'API, sans compte, sans serveur : des fichiers statiques et des sources de données ouvertes.
 
@@ -155,7 +156,9 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    Vérifié contre pvlib (NREL SPA) à mieux que 0,05°.
 2. **Champ de hauteurs** (`js/shadow-worker.js`) : pour la vue courante (plus une marge de 30 %), le worker télécharge
    les tuiles de relief Terrarium, les échantillonne en bilinéaire, puis rasterise les emprises de bâtiments
-   (hauteur `render_height` des tuiles OpenMapTiles) avec un toit plat posé sur le relief.
+   (hauteur `render_height` des tuiles OpenMapTiles) avec un toit plat posé sur le relief. Les bois et forêts (couche
+   `landcover`, classe `wood`) suivent, en canopée de 15 m posée sur le sol nu, jamais sur un bâtiment. Ils vont dans le
+   champ des hauteurs `H`, jamais dans le relief seul `T` que le balayage lit au point exact du rayon.
    Le calcul part quand la carte a fini de charger. Si une tuile du fond reste muette, il part quand même au bout
    de 6 secondes, puis il est refait quand les tuiles en retard arrivent.
 3. **Ombres** (`js/shadow-engine.js`) : balayage de la grille dans la direction opposée au soleil ; chaque cellule
@@ -186,7 +189,11 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - La hauteur des bâtiments vient d'OpenStreetMap : souvent estimée (niveaux × 3 m), parfois absente (6 m par défaut).
 - Le relief a une résolution de 30 m environ (mieux en Europe) : les ombres fines des petits reliefs sont lissées.
 - Les ombres des bâtiments situés juste hors de la zone chargée peuvent manquer en bord de carte.
-- Les arbres ne sont pas pris en compte.
+- Arbres : seuls les bois et forêts d'OpenStreetMap comptent, tous à 15 m de haut et feuillus toute l'année. Les arbres
+  isolés et les alignements de rues n'y sont pas : il faudrait une autre source (Overpass), donc une nouvelle origine
+  externe à ajouter à la politique de sécurité. Les parcs, surtout des pelouses, ne comptent pas.
+- Un bois est vu d'en haut : sa cime est au soleil, son ombre tombe sur le terrain découvert voisin. Un point posé dans un
+  bois est mesuré au sol, sous les arbres (à hauteur de drone, au-dessus).
 - Lever et coucher du soleil et de la lune sont astronomiques : le relief qui masque l'horizon n'y entre pas (il entre en
   revanche dans les heures de soleil d'un point et d'une façade).
 - La façade est lue sur les emprises de bâtiments de la carte : un mur absent d'OpenStreetMap ne sera pas trouvé, et
