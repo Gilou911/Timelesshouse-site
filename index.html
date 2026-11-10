@@ -96,6 +96,18 @@
     </section>
 
     <section class="card">
+      <h2>Carnet de lieux</h2>
+      <p class="hint" id="places-hint">Enregistrez le lieu affiché pour le rouvrir d'un geste, avec son point, sa façade, sa cérémonie et sa date.</p>
+      <form id="place-form" class="place-form" autocomplete="off">
+        <input id="place-name" type="text" required maxlength="80" placeholder="Nom du lieu" aria-label="Nom du lieu" enterkeyhint="done">
+        <button type="submit" class="btn">Enregistrer</button>
+      </form>
+      <p class="error" id="place-error" role="alert" hidden></p>
+      <ul id="places" class="places"></ul>
+      <p class="fineprint">Le carnet reste dans ce navigateur, sur cet appareil. Il s'ouvre aussi en touchant le champ de recherche vide.</p>
+    </section>
+
+    <section class="card">
       <h2>Couches</h2>
       <div class="seg" role="radiogroup" aria-label="Mode d'affichage">
         <label><input type="radio" name="mode" value="shadows" checked><span>Ombres à l'heure</span></label>

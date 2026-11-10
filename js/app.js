@@ -4,7 +4,7 @@ import { sunPosition, dayInfo, lightPhase, shadowLength, lightBands } from './su
 import {
   browserTimeZone, isValidTimeZone, wallToUTC, minutesOfDay, tzLabel, formatMinutes, formatTime, formatDateISO, formatDuration,
 } from './tz.js';
-import { parseHash, buildHash, isValidDateISO, isValidTime } from './state.js';
+import { parseHash, buildHash, isValidDateISO, isValidTime, parsePlaces, addPlace } from './state.js';
 import { searchPlace } from './geocode.js';
 import { nearestWall, offsetLngLat, facadeLit, litIntervals } from './facade.js';
 
@@ -24,6 +24,7 @@ const ui = {
   eventActions: $('event-actions'), eventClear: $('event-clear'), moment: $('moment'), eventMark: $('event-mark'),
   facadeOn: $('facade-on'), facade: $('facade'), facadeAz: $('facade-az'), facadeDir: $('facade-dir'), facadeNote: $('facade-note'),
   facadeHours: $('facade-hours'), facadeList: $('facade-list'), facadeBar: $('facade-bar'),
+  placesHint: $('places-hint'), placeForm: $('place-form'), placeName: $('place-name'), placeError: $('place-error'), places: $('places'),
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -670,10 +671,12 @@ function showResults(items) {
     li.setAttribute('role', 'option');
     if (it.empty) li.className = 'empty';
     else {
+      // Un lieu du carnet s'ouvre (it.open) ; un résultat de recherche se survole.
+      const go = () => (it.open ? it.open() : goToResult(it));
       li.tabIndex = 0;
-      li.addEventListener('click', () => goToResult(it));
+      li.addEventListener('click', go);
       li.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') goToResult(it);
+        if (ev.key === 'Enter') go();
       });
     }
     ui.results.appendChild(li);
@@ -689,7 +692,24 @@ function goToResult(r) {
     map.flyTo({ center: [r.lng, r.lat], zoom: Math.max(map.getZoom(), 14), duration: 900 });
   }
   ui.searchInput.blur();
+  // Le nom trouvé devient celui proposé pour le carnet, tant qu'on n'en a pas tapé un autre.
+  if (!ui.placeName.value || autoName) {
+    ui.placeName.value = r.name.split(',')[0].trim();
+    autoName = true;
+  }
 }
+// Champ de recherche vide : le carnet de lieux en guise de suggestions.
+function showPlaces() {
+  const list = readPlaces();
+  if (list.length) showResults([{ name: 'Carnet de lieux', empty: true }, ...list.map((p) => ({ name: p.name, open: () => openPlace(p.hash) }))]);
+}
+ui.searchInput.addEventListener('focus', () => {
+  if (!ui.searchInput.value.trim()) showPlaces();
+});
+ui.searchInput.addEventListener('input', () => {
+  if (!ui.searchInput.value.trim()) showPlaces();
+  else ui.results.hidden = true;
+});
 document.addEventListener('click', (e) => {
   if (!ui.search.contains(e.target)) ui.results.hidden = true;
 });
@@ -737,8 +757,12 @@ function scheduleHash() {
 }
 function syncHash(force = false) {
   if (state.playing && !force) return;
+  const h = currentHash();
+  if (h !== location.hash) history.replaceState(null, '', h);
+}
+function currentHash() {
   const c = map.getCenter();
-  const h = buildHash({
+  return buildHash({
     lat: c.lat,
     lng: c.lng,
     zoom: map.getZoom(),
@@ -757,8 +781,96 @@ function syncHash(force = false) {
     event: state.event && { date: state.event.date, time: formatMinutes(state.event.minutes) },
     facade: state.facade,
   });
-  if (h !== location.hash) history.replaceState(null, '', h);
 }
+
+// ---------- Carnet de lieux (stockage du navigateur, aucun serveur) ----------
+const PLACES_KEY = 'ombres.carnet';
+let autoName = false; // le nom du champ vient de la recherche : une nouvelle recherche peut le remplacer
+
+function readPlaces() {
+  try {
+    return parsePlaces(localStorage.getItem(PLACES_KEY));
+  } catch {
+    return []; // stockage refusé (navigation privée stricte, réglages du navigateur)
+  }
+}
+
+function savePlaces(list) {
+  try {
+    localStorage.setItem(PLACES_KEY, JSON.stringify(list));
+    ui.placeError.hidden = true;
+  } catch {
+    ui.placeError.textContent = 'Le navigateur refuse d\'enregistrer (navigation privée ?) : le carnet n\'a pas changé.';
+    ui.placeError.hidden = false;
+  }
+  renderPlaces();
+}
+
+function renderPlaces() {
+  const list = readPlaces();
+  ui.placesHint.hidden = list.length > 0;
+  ui.places.innerHTML = '';
+  for (const p of list) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'place-open';
+    const name = document.createElement('span');
+    name.textContent = p.name;
+    open.append(name);
+    const ev = parseHash(p.hash).event;
+    if (ev) {
+      const meta = document.createElement('small');
+      meta.textContent = `cérémonie le ${ev.date.split('-').reverse().join('/')} à ${ev.time}`;
+      open.append(meta);
+    }
+    open.addEventListener('click', () => openPlace(p.hash));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'link danger';
+    del.textContent = 'Supprimer';
+    del.setAttribute('aria-label', `Supprimer ${p.name}`);
+    del.addEventListener('click', () => savePlaces(readPlaces().filter((q) => q.name !== p.name)));
+    const li = document.createElement('li');
+    li.append(open, del);
+    ui.places.append(li);
+  }
+}
+
+/** Rouvre un lieu : vue, point, façade, cérémonie, date et heure. Les réglages d'affichage (fond, couches) restent. */
+function openPlace(h) {
+  const p = parseHash(h);
+  if (p.lat == null) return;
+  ui.results.hidden = true;
+  ui.searchInput.blur();
+  // Le jour du repérage reste celui qu'on regardait, sauf si c'était la cérémonie d'un autre lieu.
+  const scout = state.event && state.date === state.event.date ? state.scout : { date: state.date, minutes: state.minutes };
+  state.event = p.event ? { date: p.event.date, minutes: hhmmToMinutes(p.event.time) } : null;
+  state.scout = scout;
+  if (state.event) state.eventMinutes = state.event.minutes;
+  renderEvent();
+  state.facade = p.facade ?? null;
+  facadeNote = '';
+  state.tzAuto = !isValidTimeZone(p.tz);
+  state.tz = state.tzAuto ? tzFor(p.lat, p.lng) : p.tz;
+  if (p.date) state.date = p.date;
+  if (p.time) state.minutes = hhmmToMinutes(p.time);
+  map.jumpTo({ center: [p.lng, p.lat], zoom: p.zoom, bearing: p.bearing || 0, pitch: p.pitch || 0 });
+  setPoint(p.point || null);
+  renderFacade();
+  if (state.mode === 'exposure') requestExposureMap();
+}
+
+ui.placeForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = ui.placeName.value.trim();
+  if (!name) return;
+  savePlaces(addPlace(readPlaces(), { name, hash: currentHash() }));
+  if (ui.placeError.hidden) {
+    ui.placeName.value = '';
+    autoName = false;
+  }
+});
+ui.placeName.addEventListener('input', () => (autoName = false));
 
 // La barre de temps peut dépasser sa hauteur nominale (fuseau long, petit écran) : on mesure sa hauteur réelle.
 const timebar = document.querySelector('.timebar');
@@ -773,6 +885,7 @@ if (timebar && 'ResizeObserver' in window) {
 // Premier affichage (la carte déclenchera aussi refreshAll à 'ready').
 renderEvent();
 renderFacade();
+renderPlaces();
 refreshAll();
 if (state.point) setPoint(state.point);
 tzReady.then(() => {

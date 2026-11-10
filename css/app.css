@@ -304,11 +304,26 @@ body {
 .icon-btn .ic-pause { display: none; }
 .icon-btn.playing .ic-play { display: none; }
 .icon-btn.playing .ic-pause { display: block; }
-#date, .field input {
+#date, .field input, .place-form input {
   min-height: var(--hit); padding: 0 10px; border: 0; border-radius: var(--r-control);
   background: var(--fill); color: var(--text); font: inherit; font-size: 1rem; font-variant-numeric: tabular-nums;
 }
 .field input { width: 100%; min-width: 0; }
+/* Carnet de lieux : un champ et son bouton, puis une ligne par lieu (le nom l'ouvre, « Supprimer » à droite). */
+.place-form { display: flex; gap: 8px; margin-top: 12px; }
+.place-form input { flex: 1; min-width: 0; }
+.place-form input::placeholder { color: var(--text-2); }
+.error { margin: 8px 0 0; font-size: 0.875rem; color: var(--danger); }
+.places { margin: 12px 0 0; padding: 0; list-style: none; }
+.places li { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--hairline); }
+.places li:last-child { border-bottom: 1px solid var(--hairline); }
+.place-open {
+  display: flex; flex-direction: column; justify-content: center; flex: 1; min-width: 0; min-height: var(--hit); padding: 6px 0;
+  border: 0; background: none; color: var(--text); text-align: left; font: inherit; font-size: 0.9375rem; cursor: pointer;
+}
+.place-open span { overflow-wrap: anywhere; } /* un nom long passe à la ligne plutôt que d'être tronqué */
+.place-open small { font-size: 0.8125rem; color: var(--text-2); }
+.link.danger { color: var(--danger); }
 /* Cérémonie ou repérage : les mêmes segments que dans le panneau, posés dans la ligne du jour. */
 .timebar .seg { flex: none; margin: 0; }
 .moment span { padding: 0 14px; }
@@ -357,11 +372,12 @@ body {
 /* ---------- États : pressé partout, survol seulement là où il existe ---------- */
 .btn, .icon-btn, .panel-toggle, .brand { transition: transform 100ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out; }
 .btn:active, .icon-btn:active, .panel-toggle:active, .brand:active { transform: scale(0.96); }
-.link:active, .search button:active, .seg span:active, .results li:active { opacity: 0.6; }
+.link:active, .search button:active, .seg span:active, .results li:active, .place-open:active { opacity: 0.6; }
 @media (hover: hover) {
   .btn:hover { background: var(--fill); }
   .icon-btn:hover { opacity: 0.88; }
   .search button:hover, .link:hover { opacity: 0.8; }
+  .place-open:hover span { text-decoration: underline; text-underline-offset: 3px; }
   .results li:hover, #map .maplibregl-ctrl-group button:not(:disabled):hover { background-color: var(--fill); }
 }
 
@@ -393,7 +409,7 @@ body {
     transition: transform 200ms ease-in, opacity 200ms ease-in, visibility 0s linear 200ms;
   }
   /* Corps de texte à 16-17 px et champs à 17 px : sous 16 px, iOS zoome sur le champ touché. */
-  .search input, .rows dd, .switch { font-size: 1.0625rem; }
+  .search input, .rows dd, .switch, .place-open, .place-form input { font-size: 1.0625rem; }
   .hint, .exposure-list, .rows dt { font-size: 1rem; }
   .time-label { font-size: 2rem; }
   .tz-label { font-family: var(--font); } /* plus étroite que la chasse fixe : le fuseau tient mieux */

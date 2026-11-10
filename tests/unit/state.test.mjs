@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHash, buildHash, isValidDateISO, isValidTime } from '../../js/state.js';
+import { parseHash, buildHash, isValidDateISO, isValidTime, parsePlaces, addPlace } from '../../js/state.js';
 
 test('aller-retour de l\'état dans le hash', () => {
   const st = { lat: 48.8566, lng: 2.3522, zoom: 15.5, bearing: -20, pitch: 45, date: '2026-11-09', time: '15:30', tz: 'Europe/Paris', style: 'satellite', buildings3d: true, terrain: false, shadows: true, point: { lat: 48.85, lng: 2.35 } };
@@ -79,4 +79,21 @@ test('date et heure du lien : seules les valeurs réelles sont acceptées', () =
   const q = parseHash('#48.8/2.3/12?d=2024-02-29&t=23:59');
   assert.equal(q.date, '2024-02-29');
   assert.equal(q.time, '23:59');
+});
+
+test('carnet de lieux : lecture prudente du stockage, ajout en tête, même nom remplacé', () => {
+  for (const bad of [null, '', 'pas du json', '{"name":"a"}', '42']) assert.deepEqual(parsePlaces(bad), [], `ignoré : ${bad}`);
+  const stored = JSON.stringify([
+    { name: 'Château de Vaux', hash: '#48.56/2.71/17?ev=2027-06-12T16:00' },
+    { name: '', hash: '#1/2/3' },
+    { name: 'Sans lien', hash: 'http://ailleurs' },
+    null,
+    { name: 'Parc', hash: '#48.8/2.3/15' },
+  ]);
+  assert.deepEqual(parsePlaces(stored).map((p) => p.name), ['Château de Vaux', 'Parc'], 'entrées mal formées écartées');
+  let list = parsePlaces(stored);
+  list = addPlace(list, { name: 'Orangerie', hash: '#1/2/3' });
+  assert.deepEqual(list.map((p) => p.name), ['Orangerie', 'Château de Vaux', 'Parc'], 'le dernier enregistré en tête');
+  list = addPlace(list, { name: ' château de vaux ', hash: '#9/9/9' });
+  assert.deepEqual(list.map((p) => p.hash), ['#9/9/9', '#1/2/3', '#48.8/2.3/15'], 'même nom : remplacé, remonté en tête');
 });

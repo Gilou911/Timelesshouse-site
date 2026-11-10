@@ -55,6 +55,24 @@ export function parseHash(hash) {
   return out;
 }
 
+/** Carnet de lieux lu depuis le stockage du navigateur : seules les entrées { name, hash } bien formées restent. */
+export function parsePlaces(text) {
+  let v;
+  try {
+    v = JSON.parse(text || '[]');
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(v)) return [];
+  return v.filter((p) => p && typeof p.name === 'string' && p.name.trim() && typeof p.hash === 'string' && p.hash.startsWith('#')).slice(0, 200);
+}
+
+/** Ajoute un lieu en tête du carnet ; un lieu du même nom (casse ignorée) est remplacé. */
+export function addPlace(list, place) {
+  const key = place.name.trim().toLocaleLowerCase('fr');
+  return [place, ...list.filter((p) => p.name.trim().toLocaleLowerCase('fr') !== key)];
+}
+
 export function buildHash(st) {
   const r = (v, n) => Number(v).toFixed(n).replace(/\.?0+$/, '');
   let path = `${r(st.lat, 5)}/${r(st.lng, 5)}/${r(st.zoom, 2)}`;
