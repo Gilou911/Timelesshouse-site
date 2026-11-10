@@ -1,6 +1,7 @@
 // Carte MapLibre + couche d'ombres (worker) + tracé du soleil.
 import { lngLatToMercator, mercatorToLngLat, metersPerUnit } from './shadow-engine.js';
-import { TreeStore, TREES_MIN_ZOOM, treeFeatures } from './trees.js';
+import { TreeStore, TREES_MIN_ZOOM } from './trees.js';
+import { TreesLayer } from './trees3d.js';
 
 const CFG = (typeof window !== 'undefined' && window.OMBRES_CONFIG) || {};
 export const DEM_URL = CFG.demUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
@@ -127,7 +128,7 @@ export class ShadowMap {
     this.ready = false;
 
     this.trees = new TreeStore({ parisUrl: PARIS_TREES_URL, overpassUrl: OVERPASS_URL, onUpdate: () => this._onTreesUpdate() });
-    this._treesFC = EMPTY_FC;
+    this._treesLayer = new TreesLayer('ombres-trees-3d');
     this._treesParis = false; // arbres de la Ville de Paris dans la vue : leur crédit est affiché
 
     this.canvas = document.createElement('canvas');
@@ -169,9 +170,15 @@ export class ShadowMap {
         // Carte qui n'atteint pas le repos (tuile muette) : la tuile tardive relance le calcul sans attendre « idle ».
         if (this._idleLate) this._scheduleHeightfield();
       }
+      if (e.tile && e.sourceId === 'dem') this._treesBaseDirty = true;
     });
     this.map.on('idle', () => {
       this._idleLate = false;
+      // Relief 3D : le pied des arbres est posé sur le sol, lu quand ses tuiles sont là.
+      if (this._treesBaseDirty && this.options.terrain) {
+        this._treesBaseDirty = false;
+        this._treesLayer.setBase(this._groundAt());
+      }
       if (this._tilesSinceBuild && !this._idleHandler) {
         this._tilesSinceBuild = false;
         this._scheduleHeightfield();
@@ -585,43 +592,40 @@ export class ShadowMap {
   _setTreeFeatures(list, key = null, paris = false) {
     if (!list && this._treesKey == null) return;
     this._treesKey = key;
-    this._treesFC = list && list.length ? treeFeatures(list) : EMPTY_FC;
-    const src = this.map.getSource('ombres-trees');
-    if (src && paris !== this._treesParis) {
+    this._treesLayer.setTrees(list || [], this._groundAt());
+    if (this.options.terrain) this._treesBaseDirty = true; // tuiles de relief pas forcément toutes là
+    if (this.map.getSource('ombres-trees') && paris !== this._treesParis) {
       // Le crédit d'une source est lu à sa création : on la recrée quand des arbres de la Ville entrent ou sortent.
       this._treesParis = paris;
-      this.map.removeLayer('ombres-trees-3d');
+      this.map.removeLayer('ombres-trees-credit');
       this.map.removeSource('ombres-trees');
       this._addTreesLayer();
-    } else if (src) {
-      src.setData(this._treesFC);
     }
   }
 
-  /** Arbres isolés en volume : tronc et houppier arrondi, éclairés comme les bâtiments par la lumière du soleil. */
+  /**
+   * Arbres isolés en volume (TreesLayer, js/trees3d.js) : houppier rond sur un tronc, éclairé par le soleil. Une source
+   * vide porte leur crédit : une couche personnalisée n'en a pas, et le crédit des données doit s'afficher.
+   */
   _addTreesLayer() {
     const map = this.map;
+    const before = map.getLayer(this._firstSymbol) ? this._firstSymbol : undefined;
     if (!map.getSource('ombres-trees')) {
       const attribution = TREES_ATTRIBUTION[this._treesParis ? 'paris' : 'osm'];
-      map.addSource('ombres-trees', { type: 'geojson', data: this._treesFC, attribution, tolerance: 0.05, buffer: 16 });
+      map.addSource('ombres-trees', { type: 'geojson', data: EMPTY_FC, attribution });
     }
-    if (!map.getLayer('ombres-trees-3d')) {
-      map.addLayer(
-        {
-          id: 'ombres-trees-3d',
-          type: 'fill-extrusion',
-          source: 'ombres-trees',
-          minzoom: TREES_MIN_ZOOM - 0.5,
-          paint: {
-            'fill-extrusion-color': ['match', ['get', 'k'], 0, '#7a6550', this.options.style === 'satellite' ? '#5d8a4c' : '#78a75e'],
-            'fill-extrusion-base': ['get', 'b'],
-            'fill-extrusion-height': ['get', 't'],
-            'fill-extrusion-opacity': this._treesOpacity(),
-          },
-        },
-        map.getLayer(this._firstSymbol) ? this._firstSymbol : undefined,
-      );
+    if (!map.getLayer('ombres-trees-credit')) {
+      map.addLayer({ id: 'ombres-trees-credit', type: 'fill', source: 'ombres-trees', minzoom: TREES_MIN_ZOOM - 0.5, paint: { 'fill-opacity': 0 } }, before);
     }
+    this._treesLayer.satellite = this.options.style === 'satellite';
+    this._treesLayer.visible = this._treesVisible();
+    if (!map.getLayer('ombres-trees-3d')) map.addLayer(this._treesLayer, before);
+  }
+
+  /** Altitude du sol pour le pied des arbres : celle du relief 3D quand il est affiché, sinon aucune (sol plat). */
+  _groundAt() {
+    if (!this.options.terrain || !this.map.getTerrain()) return null;
+    return (lng, lat) => this.map.queryTerrainElevation([lng, lat]) || 0;
   }
 
   /** De nouveaux arbres sont arrivés (ou un serveur a échoué) : on recalcule, groupé sur 300 ms. */
@@ -631,8 +635,13 @@ export class ShadowMap {
     this._treesTimer = setTimeout(() => this._scheduleHeightfield(true), 300);
   }
 
-  _treesOpacity() {
-    return this.options.trees && this.options.buildings3d ? 0.95 : 0;
+  _treesVisible() {
+    return this.options.trees && this.options.buildings3d;
+  }
+
+  _showTrees3d() {
+    this._treesLayer.visible = this._treesVisible();
+    this.map.triggerRepaint();
   }
 
   /**
@@ -804,6 +813,7 @@ export class ShadowMap {
    */
   setSun(azimuth, altitude, extra = {}) {
     this.sun = { azimuth, altitude, ...extra };
+    this._treesLayer.setSun(azimuth, altitude);
     this._applyLight();
     this._requestRender();
   }
@@ -844,13 +854,13 @@ export class ShadowMap {
     if (this.map.getLayer('ombres-buildings-3d')) {
       this.map.setPaintProperty('ombres-buildings-3d', 'fill-extrusion-opacity', v ? 0.9 : 0);
     }
-    if (this.map.getLayer('ombres-trees-3d')) this.map.setPaintProperty('ombres-trees-3d', 'fill-extrusion-opacity', this._treesOpacity());
+    this._showTrees3d();
   }
 
   /** Bois et arbres isolés : le champ de hauteurs est recalculé avec ou sans eux. */
   setTrees(v) {
     this.options.trees = v;
-    if (this.map.getLayer('ombres-trees-3d')) this.map.setPaintProperty('ombres-trees-3d', 'fill-extrusion-opacity', this._treesOpacity());
+    this._showTrees3d();
     this._scheduleHeightfield(true);
   }
 
@@ -858,6 +868,9 @@ export class ShadowMap {
     this.options.terrain = v;
     if (!this.map.getSource('dem')) return;
     this.map.setTerrain(v ? { source: 'dem', exaggeration: 1 } : null);
+    // Les arbres suivent : posés sur le relief (lu au prochain repos de la carte), ou de nouveau sur un sol plat.
+    if (v) this._treesBaseDirty = true;
+    else this._treesLayer.setBase(null);
     if (this.map.getLayer('ombres-hillshade')) this.map.setLayoutProperty('ombres-hillshade', 'visibility', v ? 'visible' : 'none');
   }
 

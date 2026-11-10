@@ -150,42 +150,6 @@ export function overpassQuery([w, s, e, n]) {
 
 const intersects = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 
-// Houppier en cinq tranches de cylindre : [bas, haut] en fraction de sa hauteur, rayon pris au milieu de la tranche
-// sur un ellipsoïde (√(1 − z²), z de −1 en bas à 1 en haut). Assez rond vu de près, assez léger pour des milliers.
-const CROWN_SLABS = [[0, 0.15], [0.15, 0.4], [0.4, 0.7], [0.7, 0.88], [0.88, 1]].map(([a, b]) => {
-  const z = a + b - 1; // milieu de la tranche, ramené à [−1, 1]
-  return [a, b, Math.sqrt(1 - z * z)];
-});
-
-/**
- * Volumes 3D des arbres (GeoJSON pour une couche fill-extrusion) : un tronc carré et un houppier arrondi en cinq
- * tranches de cylindre. Propriétés : b = base, t = sommet (m), k = 0 tronc, 1 houppier.
- */
-export function treeFeatures(trees) {
-  const features = [];
-  const ring = (lng, lat, r, n, rot) => {
-    const kx = 1 / (M_PER_DEG * Math.cos((lat * Math.PI) / 180));
-    const out = [];
-    for (let i = 0; i <= n; i++) {
-      const a = rot + (2 * Math.PI * (i % n)) / n;
-      out.push([lng + r * Math.sin(a) * kx, lat + (r * Math.cos(a)) / M_PER_DEG]);
-    }
-    return [out];
-  };
-  for (let i = 0; i < trees.length; i += 4) {
-    const lng = trees[i];
-    const lat = trees[i + 1];
-    const { h, r, hb } = treeShape(trees[i + 2], trees[i + 3]);
-    const c = h - hb; // hauteur du houppier
-    const trunk = Math.max(0.15, Math.min(0.5, r * 0.08));
-    features.push({ type: 'Feature', properties: { b: 0, t: hb + 0.2 * c, k: 0 }, geometry: { type: 'Polygon', coordinates: ring(lng, lat, trunk, 4, Math.PI / 4) } });
-    for (const [z0, z1, f] of CROWN_SLABS) {
-      features.push({ type: 'Feature', properties: { b: hb + z0 * c, t: hb + z1 * c, k: 1 }, geometry: { type: 'Polygon', coordinates: ring(lng, lat, r * f, 10, 0) } });
-    }
-  }
-  return { type: 'FeatureCollection', features };
-}
-
 const CACHE_NAME = 'ombres-arbres-1';
 const CACHE_DAYS = 30;
 const RETRY_FAILED_MS = 120000; // une tuile en échec est redemandée deux minutes plus tard, si on y revient

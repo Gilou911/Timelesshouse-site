@@ -194,8 +194,11 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    8 minutes, sans recalcul tant qu'il refuse). Chaque arbre devient un houppier en ellipsoïde posé sur un tronc : hauteur connue, sinon tirée de la
    circonférence, sinon 10 m ; houppier de 0,6 fois la hauteur (2 à 16 m) s'il n'est pas noté, à partir du tiers de la
    hauteur (1,5 à 5 m). Son ombre est calculée après le balayage, cellule par cellule, en lançant le rayon de soleil
-   depuis la surface (sol ou toit) : elle se détache du pied quand le soleil baisse, comme sous un vrai arbre. En 3D, un
-   tronc et cinq tranches de cylindre (couche `fill-extrusion`, éclairée par la lumière du soleil comme les bâtiments).
+   depuis la surface (sol ou toit) : elle se détache du pied quand le soleil baisse, comme sous un vrai arbre. En 3D
+   (`js/trees3d.js`), une couche WebGL de MapLibre dessine chaque arbre d'un seul tenant : le houppier est cet
+   ellipsoïde même, lisse et éclairé par le soleil (côté soleil clair, côté opposé sombre ; la nuit, seul le ciel),
+   sur un tronc ; les bâtiments le cachent ou le laissent voir comme il faut (profondeur partagée), et avec le relief 3D
+   son pied suit le sol. Sous le zoom 16,5, une sphère plus simple suffit (20 000 arbres à 60 images par seconde).
 6. **Un point mesuré** : un rayon par instant, du point vers le soleil, à travers la grille (relief, bâtiments, bois). Au-delà
    du bord de la grille, un **horizon lointain** prend le relais : sur des tuiles de relief de zoom 11 (environ 55 m),
    l'élévation apparente du relief jusqu'à 20 km est relevée dans 360 directions, courbure de la Terre comprise ; le soleil

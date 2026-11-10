@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseMeters, heightFromGirth, treeShape, parisTrees, osmTrees, withoutDuplicates, tileOf, tileBounds, overpassQuery,
-  treeFeatures, TreeStore, TREE_TILE_ZOOM,
+  TreeStore, TREE_TILE_ZOOM,
 } from '../../js/trees.js';
+import { sphereMesh, cylinderMesh, treeInstances, treeLight, mercatorPerMeter, STRIDE } from '../../js/trees3d.js';
 import { castTreeShadows, treesAround, treeBlocksSun, pointExposure, renderShadows } from '../../js/shadow-engine.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -65,24 +66,38 @@ test('arbres : tuiles et requête Overpass', () => {
   assert.match(q, /way\["natural"="tree_row"\]/);
 });
 
-test('arbres : volumes 3D, un tronc et cinq tranches de houppier par arbre', () => {
-  const fc = treeFeatures([2.3, 48.86, 15, 0]);
-  assert.equal(fc.features.length, 6);
-  const [trunk, ...crown] = fc.features.map((f) => f.properties);
-  assert.equal(trunk.k, 0);
-  assert.equal(trunk.b, 0);
-  assert.ok(trunk.t > 4.5 && trunk.t < 15);
-  assert.deepEqual(crown.map((p) => p.k), [1, 1, 1, 1, 1]);
-  assert.equal(crown[0].b, 4.5);
-  assert.ok(near(crown[4].t, 15));
-  for (let i = 1; i < crown.length; i++) assert.ok(near(crown[i].b, crown[i - 1].t), 'tranches jointives');
-  const radius = (f) => (f.geometry.coordinates[0][0][1] - 48.86) * 111320; // premier sommet au nord
-  const radii = fc.features.slice(1).map(radius);
-  assert.ok(radii[2] > 4.45 && radii[2] <= 4.5, 'tranche du milieu : presque tout le rayon');
-  assert.ok(radii[0] < radii[1] && radii[1] < radii[2] && radii[4] < radii[3] && radii[3] < radii[2], radii.join());
-  const ring = fc.features[3].geometry.coordinates[0];
-  assert.equal(ring.length, 11);
-  assert.deepEqual(ring[0], ring[10]); // anneau fermé
+test('arbres en 3D : sphère et tronc unités, données par arbre en unités Mercator, lumière du soleil', () => {
+  const sphere = sphereMesh(14, 9);
+  assert.equal(sphere.length, 14 * 9 * 6 * 3);
+  for (let i = 0; i < sphere.length; i += 3) assert.ok(near(Math.hypot(sphere[i], sphere[i + 1], sphere[i + 2]), 1, 1e-6), 'sommets sur la sphère unité');
+  const zs = Array.from(sphere).filter((_, i) => i % 3 === 2);
+  assert.ok(near(Math.min(...zs), -1, 1e-6) && near(Math.max(...zs), 1, 1e-6), 'du pôle sud au pôle nord');
+  const trunk = cylinderMesh(6);
+  assert.equal(trunk.length, 6 * 6 * 3);
+  assert.deepEqual([...new Set(Array.from(trunk).filter((_, i) => i % 3 === 2))].sort(), [0, 1]);
+
+  // Deux arbres : 15 m sans diamètre (houppier de 4,5 à 15 m, rayon 4,5 m), et 25 m pour 8 m de large, 30 m plus à l'est.
+  const lat = 48.86;
+  const k = mercatorPerMeter(lat);
+  const trees = [2.3, lat, 15, 0, 2.3 + 30 / (111320 * Math.cos((lat * Math.PI) / 180)), lat, 25, 8];
+  const origin = [0.5063888888888889, 0.3436];
+  const data = treeInstances(trees, origin, k);
+  assert.equal(data.length, 2 * STRIDE);
+  const m = (v) => v / k; // unités Mercator → mètres
+  assert.ok(near(m(data[3]), 4.5, 1e-3) && near(m(data[4]), 5.25, 1e-3) && near(m(data[5]), 9.75, 1e-3), 'r, demi-hauteur, centre');
+  assert.ok(near(m(data[STRIDE] - data[0]), 30, 0.05), `30 m d'écart : ${m(data[STRIDE] - data[0])}`);
+  assert.ok(near(m(data[STRIDE + 3]), 4, 1e-3) && near(m(data[STRIDE + 5]), 15, 1e-3));
+  assert.equal(data[2], 0, 'sol plat sans relief 3D');
+  assert.ok(Math.abs(data[6]) <= 0.06 && data[6] !== data[STRIDE + 6], 'teintes de ±6 %, différentes d\'un arbre à l\'autre');
+  const onHill = treeInstances(trees, origin, k, () => 1035);
+  assert.ok(near(m(onHill[2]), 1035, 1e-2), 'pied posé sur le relief 3D');
+
+  // Soleil au sud à 30° : lumière du sud, en hauteur ; la nuit, plus de lumière directe.
+  const day = treeLight(180, 30);
+  assert.ok(near(day.dir[0], 0, 1e-9) && near(day.dir[1], -Math.cos(Math.PI / 6), 1e-9) && near(day.dir[2], 0.5, 1e-9));
+  assert.deepEqual([day.ambient, day.direct], [0.6, 0.5]);
+  const night = treeLight(180, -10);
+  assert.deepEqual([night.ambient, night.direct], [0.35, 0]);
 });
 
 test('TreeStore : Paris et OpenStreetMap chargés en une requête chacun, doublons retirés, échec signalé', async () => {

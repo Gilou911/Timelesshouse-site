@@ -724,11 +724,28 @@ await scenario('Arbres isolés : Ville de Paris et OpenStreetMap, volumes 3D, om
   assert.match(await page.textContent('#status'), /21\u00a0arbres/);
   const fc = await page.evaluate(() => {
     const sm = window.__ombres.shadowMap;
-    return { n: sm._treesFC.features.length, op: sm.map.getPaintProperty('ombres-trees-3d', 'fill-extrusion-opacity'), attrib: document.querySelector('.maplibregl-ctrl-attrib-inner').textContent };
+    return { n: sm._treesLayer.count, visible: sm._treesLayer.visible, layer: !!sm.map.getLayer('ombres-trees-3d'), attrib: document.querySelector('.maplibregl-ctrl-attrib-inner').textContent };
   });
-  assert.equal(fc.n, 21 * 6);
-  assert.equal(fc.op, 0.95);
+  assert.deepEqual([fc.n, fc.visible, fc.layer], [21, true, true], JSON.stringify(fc));
   assert.match(fc.attrib, /Arbres : Ville de Paris, OpenStreetMap/);
+  // Houppiers dessinés : vert franc au droit des cinq arbres de la Ville (vus de dessus), lu pendant le rendu.
+  const greenAtTrees = () => page.evaluate(() => new Promise((resolve) => {
+    const m = window.__ombres.shadowMap.map;
+    m.once('render', () => {
+      const gl = m.getCanvas().getContext('webgl2') || m.getCanvas().getContext('webgl');
+      const ratio = gl.drawingBufferWidth / m.getCanvas().clientWidth;
+      let green = 0;
+      for (const dy of [-100, -50, 0, 50, 100]) {
+        const p = m.project([2.3522 + 520 / (111320 * Math.cos((48.8566 * Math.PI) / 180)), 48.8566 + dy / 111320]);
+        const px = new Uint8Array(4);
+        gl.readPixels(Math.round(p.x * ratio), Math.round(gl.drawingBufferHeight - p.y * ratio), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        if (px[1] > px[0] + 25 && px[1] > px[2] + 25) green++;
+      }
+      resolve(green);
+    });
+    m.triggerRepaint();
+  }));
+  assert.equal(await greenAtTrees(), 5, 'houppiers verts aux cinq arbres');
   // Ombre d'un arbre de 15 m : son centre est à 6 m au nord-est du tronc (à l'opposé du soleil).
   const alphaAt = (east, north) => page.evaluate(([e, n]) => {
     const sm = window.__ombres.shadowMap;
@@ -763,7 +780,8 @@ await scenario('Arbres isolés : Ville de Paris et OpenStreetMap, volumes 3D, om
   await page.waitForFunction((n) => window.__ombres.stats.trees === 0 && window.__ombres.frames > n, frames, { timeout: 30000 });
   await page.waitForTimeout(400);
   assert.equal(await alphaAt(...shadow), 0);
-  assert.equal(await page.evaluate(() => window.__ombres.shadowMap._treesFC.features.length), 0);
+  assert.equal(await page.evaluate(() => window.__ombres.shadowMap._treesLayer.visible), false);
+  assert.equal(await greenAtTrees(), 0, 'plus de houppiers');
   assert.doesNotMatch(await page.textContent('#status'), /arbres/);
   await context.close();
 });
