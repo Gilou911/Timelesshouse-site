@@ -91,6 +91,10 @@
           <small id="exposure-meta"></small>
           <button type="button" id="exposure-clear" class="link">Retirer le point</button>
         </div>
+        <label class="height-row"><span>Hauteur du point</span>
+          <span class="unit"><input type="text" id="point-height" inputmode="decimal" autocomplete="off" value="1,5" aria-describedby="height-hint"><span aria-hidden="true">m</span></span>
+        </label>
+        <p class="hint" id="height-hint">1,5 m à hauteur d'yeux, environ 3 m par étage, 120 m au plus pour un drone.</p>
         <label class="switch"><span>Façade ou axe de prise de vue</span><input type="checkbox" role="switch" id="facade-on"></label>
         <div id="facade" class="facade" hidden>
           <label class="range-label">

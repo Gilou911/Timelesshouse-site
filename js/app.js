@@ -27,6 +27,7 @@ const ui = {
   facadeHours: $('facade-hours'), facadeList: $('facade-list'), facadeBar: $('facade-bar'),
   placesHint: $('places-hint'), placeForm: $('place-form'), placeName: $('place-name'), placeError: $('place-error'), places: $('places'),
   moonPhase: $('moon-phase'), moonrise: $('moonrise'), moonset: $('moonset'), moonLit: $('moon-lit'), moonPos: $('moon-pos'),
+  pointHeight: $('point-height'),
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -87,7 +88,9 @@ const state = {
   eventMinutes: 0,
   scout: null,
   facade: hash.facade ?? null, // azimut vers lequel la façade (ou le sujet) fait face, null = pas de façade
+  height: hash.height ?? 1.5, // hauteur du point mesuré au-dessus du sol ou du toit (m) : étage, balcon, drone
 };
+const fmtMeters = (v) => String(v).replace('.', ',');
 function hhmmToMinutes(s) {
   const [h, m] = s.split(':').map(Number);
   return h * 60 + m;
@@ -392,7 +395,7 @@ async function computeExposure() {
   ui.exposureList.innerHTML = '';
   lastLit = null;
   renderFacade();
-  const res = await shadowMap.exposureAt(state.point, samples, 1.5);
+  const res = await shadowMap.exposureAt(state.point, samples, state.height);
   if (seq !== exposureSeq) return;
   debug.lastExposure = res;
   if (!res || !res.lit) {
@@ -410,8 +413,19 @@ async function computeExposure() {
   renderFacade();
   const alt = res.elevation != null ? `altitude ${Math.round(res.elevation)} m` : '';
   const roof = res.surface != null && res.elevation != null && res.surface - res.elevation > 1 ? ` · sur un toit (${Math.round(res.surface - res.elevation)} m)` : '';
-  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à 1,5 m ${roof ? 'au-dessus du toit' : 'du sol'}`;
+  ui.exposureMeta.textContent = `${alt}${roof} · mesuré à ${fmtMeters(state.height)} m ${roof ? 'au-dessus du toit' : 'du sol'}`;
 }
+
+// Hauteur du point : virgule ou point décimal, ramenée entre 0 et 500 m ; une saisie illisible reprend la valeur d'avant.
+ui.pointHeight.addEventListener('change', () => {
+  const v = parseFloat(ui.pointHeight.value.replace(',', '.'));
+  if (Number.isFinite(v)) {
+    state.height = Math.min(500, Math.max(0, Math.round(v * 10) / 10));
+    computeExposure();
+    scheduleHash();
+  }
+  ui.pointHeight.value = fmtMeters(state.height);
+});
 
 /** Durée totale, liste des créneaux et barre de la journée. */
 function renderSlots(intervals, hoursEl, listEl, barEl, empty) {
@@ -790,6 +804,7 @@ function currentHash() {
     opacity: state.opacity,
     event: state.event && { date: state.event.date, time: formatMinutes(state.event.minutes) },
     facade: state.facade,
+    height: state.height,
   });
 }
 
@@ -860,6 +875,8 @@ function openPlace(h) {
   renderEvent();
   state.facade = p.facade ?? null;
   facadeNote = '';
+  state.height = p.height ?? 1.5;
+  ui.pointHeight.value = fmtMeters(state.height);
   state.tzAuto = !isValidTimeZone(p.tz);
   state.tz = state.tzAuto ? tzFor(p.lat, p.lng) : p.tz;
   if (p.date) state.date = p.date;
@@ -896,6 +913,7 @@ if (timebar && 'ResizeObserver' in window) {
 renderEvent();
 renderFacade();
 renderPlaces();
+ui.pointHeight.value = fmtMeters(state.height);
 refreshAll();
 if (state.point) setPoint(state.point);
 tzReady.then(() => {

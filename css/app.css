@@ -304,11 +304,16 @@ body {
 .icon-btn .ic-pause { display: none; }
 .icon-btn.playing .ic-play { display: none; }
 .icon-btn.playing .ic-pause { display: block; }
-#date, .field input, .place-form input {
+#date, .field input, .place-form input, .unit input {
   min-height: var(--hit); padding: 0 10px; border: 0; border-radius: var(--r-control);
   background: var(--fill); color: var(--text); font: inherit; font-size: 1rem; font-variant-numeric: tabular-nums;
 }
 .field input { width: 100%; min-width: 0; }
+/* Hauteur du point : libellé à gauche, valeur et unité à droite, comme un interrupteur. */
+.height-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--hit); margin-top: 8px; font-size: 0.9375rem; cursor: text; }
+.unit { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.unit input { width: 5em; text-align: right; }
+.height-row + .hint { margin: 4px 0 6px; font-size: 0.8125rem; }
 /* Carnet de lieux : un champ et son bouton, puis une ligne par lieu (le nom l'ouvre, « Supprimer » à droite). */
 .place-form { display: flex; gap: 8px; margin-top: 12px; }
 .place-form input { flex: 1; min-width: 0; }
@@ -409,7 +414,7 @@ body {
     transition: transform 200ms ease-in, opacity 200ms ease-in, visibility 0s linear 200ms;
   }
   /* Corps de texte à 16-17 px et champs à 17 px : sous 16 px, iOS zoome sur le champ touché. */
-  .search input, .rows dd, .switch, .place-open, .place-form input { font-size: 1.0625rem; }
+  .search input, .rows dd, .switch, .place-open, .place-form input, .height-row, .unit input { font-size: 1.0625rem; }
   .hint, .exposure-list, .rows dt { font-size: 1rem; }
   .time-label { font-size: 2rem; }
   .tz-label { font-family: var(--font); } /* plus étroite que la chasse fixe : le fuseau tient mieux */

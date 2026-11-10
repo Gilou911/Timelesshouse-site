@@ -47,6 +47,11 @@ export function parseHash(hash) {
     const p = q.get('p').split(',').map(parseFloat);
     if (p.length === 2 && p.every(Number.isFinite) && Math.abs(p[0]) <= 85 && Math.abs(p[1]) <= 180) out.point = { lat: p[0], lng: p[1] };
   }
+  // Hauteur du point mesuré au-dessus du sol (ou du toit), en mètres : de 0 à 500.
+  if (q.has('h')) {
+    const v = parseFloat(q.get('h'));
+    if (Number.isFinite(v) && v >= 0 && v <= 500) out.height = v;
+  }
   // Façade : f=azimut (degrés entiers) vers lequel elle fait face.
   if (/^\d{1,3}$/.test(q.get('f') || '') && Number(q.get('f')) < 360) out.facade = Number(q.get('f'));
   // Cérémonie : ev=YYYY-MM-DDTHH:MM
@@ -88,6 +93,7 @@ export function buildHash(st) {
   if (st.mode === 'exposure') q.set('m', 'exposure');
   if (Number.isFinite(st.opacity) && Math.abs(st.opacity - 0.45) > 1e-9) q.set('o', r(st.opacity, 2));
   if (st.point) q.set('p', `${r(st.point.lat, 5)},${r(st.point.lng, 5)}`);
+  if (Number.isFinite(st.height) && Math.abs(st.height - 1.5) > 1e-9) q.set('h', r(st.height, 1));
   if (st.facade != null) q.set('f', String(Math.round(st.facade) % 360));
   if (st.event) q.set('ev', `${st.event.date}T${st.event.time}`);
   const qs = q.toString().replace(/%3A/g, ':').replace(/%2C/g, ',').replace(/%2F/g, '/');

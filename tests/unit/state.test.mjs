@@ -97,3 +97,12 @@ test('carnet de lieux : lecture prudente du stockage, ajout en tête, même nom 
   list = addPlace(list, { name: ' château de vaux ', hash: '#9/9/9' });
   assert.deepEqual(list.map((p) => p.hash), ['#9/9/9', '#1/2/3', '#48.8/2.3/15'], 'même nom : remplacé, remonté en tête');
 });
+
+test('hauteur du point dans le lien : 1,5 m par défaut, de 0 à 500 m', () => {
+  const base = { lat: 48.85, lng: 2.35, zoom: 17 };
+  assert.ok(!/h=/.test(buildHash({ ...base, height: 1.5 })), 'hauteur par défaut non encodée');
+  assert.equal(parseHash(buildHash({ ...base, height: 7.5 })).height, 7.5);
+  assert.equal(parseHash(buildHash({ ...base, height: 120 })).height, 120, 'drone');
+  assert.equal(parseHash(buildHash({ ...base, height: 0 })).height, 0, 'au ras du sol');
+  for (const bad of ['-1', '501', 'haut', '']) assert.equal(parseHash(`#48.8/2.3/12?h=${bad}`).height, undefined, `refusée : ${bad}`);
+});
