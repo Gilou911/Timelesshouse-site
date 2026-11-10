@@ -190,6 +190,10 @@ const CACHE_NAME = 'ombres-arbres-1';
 const CACHE_DAYS = 30;
 const RETRY_FAILED_MS = 120000; // une tuile en échec est redemandée deux minutes plus tard, si on y revient
 const OVERPASS_WAITS = [5000, 15000, 45000]; // serveur public saturé : il demande d'attendre de plus en plus
+// Serveur saturé ou injoignable : les tuiles encore à l'écran sont redemandées seules, de plus en plus espacées.
+const AUTO_RETRY_MS = [60000, 120000, 240000, 480000];
+// Saturé (429, 502, 503, 504) ou réseau (pas de statut) : on peut réessayer ; une autre erreur est définitive.
+const isBusy = (err) => !err.status || [429, 502, 503, 504].includes(err.status);
 
 async function fetchJSON(url, init, timeoutMs) {
   const ctrl = new AbortController();
@@ -206,14 +210,18 @@ async function fetchJSON(url, init, timeoutMs) {
 /**
  * Charge les arbres par tuile, les garde en mémoire et dans le cache du navigateur (30 jours : Overpass met souvent
  * plus de 20 s à répondre). Une seule requête par source à la fois, sur l'emprise de toutes les tuiles manquantes.
- * `onUpdate()` est appelé à chaque arrivée (ou échec), pour recalculer.
+ * `onUpdate()` est appelé à chaque arrivée (ou au premier échec), pour recalculer. Serveur saturé : nouvel essai seul
+ * au bout de 1, 2, 4 puis toutes les 8 minutes, pour les tuiles encore à l'écran. `delays` : attentes (tests).
  */
 export class TreeStore {
-  constructor({ parisUrl, overpassUrl, onUpdate }) {
+  constructor({ parisUrl, overpassUrl, onUpdate, delays = {} }) {
     this.urls = { paris: parisUrl, osm: overpassUrl };
     this.onUpdate = onUpdate;
+    this.delays = { paris: 3000, overpass: OVERPASS_WAITS, auto: AUTO_RETRY_MS, ...delays };
     this.tiles = new Map(); // "x/y" → { paris, osm } : tableau d'arbres, 'cache', 'queued', 'loading' ou { failed: t }
     this.busy = { paris: false, osm: false };
+    this.failures = { paris: 0, osm: 0 }; // échecs de suite, par source
+    this.retryTimers = { paris: null, osm: null };
     this.wanted = [];
     this.version = 0;
   }
@@ -254,8 +262,9 @@ export class TreeStore {
       }
     }
     this._pump();
-    // paris : des arbres de la Ville dans l'emprise (leur crédit doit alors s'afficher).
-    return { trees, loading, failed, paris, key: `${this.version}|${bounds.map((v) => v.toFixed(5)).join()}` };
+    // paris : des arbres de la Ville dans l'emprise (leur crédit doit alors s'afficher) ; retrying : nouvel essai prévu.
+    const retrying = !!(this.retryTimers.paris || this.retryTimers.osm);
+    return { trees, loading, failed, retrying, paris, key: `${this.version}|${bounds.map((v) => v.toFixed(5)).join()}` };
   }
 
   _tile(key) {
@@ -348,10 +357,12 @@ export class TreeStore {
     const [w, , , n] = tileBounds(x0, y0, TREE_TILE_ZOOM);
     const [, s, e] = tileBounds(x1, y1, TREE_TILE_ZOOM);
     let flat = null;
+    let busy = false;
     try {
       flat = src === 'paris' ? await this._paris([w, s, e, n]) : await this._overpass([w, s, e, n]);
-    } catch {
+    } catch (err) {
       flat = null;
+      busy = isBusy(err);
     }
     // Rangement par tuile : toutes celles de l'emprise sont complètes, même vides.
     const byTile = new Map(covered.map((k) => [k, []]));
@@ -378,9 +389,32 @@ export class TreeStore {
       if (cache) cache.put(this._cacheUrl(k, src), new Response(JSON.stringify({ t: Date.now(), trees: list }))).catch(() => {});
     }
     this.busy[src] = false;
-    this.version++;
-    this.onUpdate();
+    if (flat) {
+      this.failures[src] = 0;
+    } else {
+      this.failures[src]++;
+      if (busy) this._retryLater(src);
+    }
+    // Un nouvel échec du même serveur ne change rien à l'écran : pas de recalcul.
+    if (flat || this.failures[src] === 1) {
+      this.version++;
+      this.onUpdate();
+    }
     this._pump();
+  }
+
+  /** Nouvel essai seul, plus tard, des tuiles de cette source encore à l'écran et en échec. */
+  _retryLater(src) {
+    clearTimeout(this.retryTimers[src]);
+    const waits = this.delays.auto;
+    this.retryTimers[src] = setTimeout(() => {
+      this.retryTimers[src] = null;
+      for (const key of this.wanted) {
+        const t = this.tiles.get(key);
+        if (t && t[src] && t[src].failed !== undefined) t[src] = undefined;
+      }
+      this._pump();
+    }, waits[Math.min(this.failures[src], waits.length) - 1]);
   }
 
   async _paris([w, s, e, n]) {
@@ -391,7 +425,7 @@ export class TreeStore {
         return parisTrees(await fetchJSON(url, {}, 30000));
       } catch (err) {
         if (attempt >= 1) throw err;
-        await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, this.delays.paris));
       }
     }
   }
@@ -403,10 +437,8 @@ export class TreeStore {
       try {
         return osmTrees(await fetchJSON(this.urls.osm, init, 100000));
       } catch (err) {
-        // Serveur saturé (429, 502, 503, 504) ou réseau : on réessaie plus tard ; une autre erreur est définitive.
-        const busy = !err.status || [429, 502, 503, 504].includes(err.status);
-        if (!busy || attempt >= OVERPASS_WAITS.length) throw err;
-        await new Promise((r) => setTimeout(r, OVERPASS_WAITS[attempt]));
+        if (!isBusy(err) || attempt >= this.delays.overpass.length) throw err;
+        await new Promise((r) => setTimeout(r, this.delays.overpass[attempt]));
       }
     }
   }

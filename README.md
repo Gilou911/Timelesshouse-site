@@ -190,7 +190,8 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    ils sont notés ; `natural=tree_row`, un arbre tous les 8 m). Un arbre d'OpenStreetMap à moins de 3 m d'un arbre de la
    Ville est le même et n'est pas compté deux fois. Les tuiles reçues sont gardées 30 jours dans le cache du navigateur :
    Overpass met souvent 20 s ou plus à répondre, et demande d'attendre quand il est saturé (nouvel essai après 5, 15 puis
-   45 s). Chaque arbre devient un houppier en ellipsoïde posé sur un tronc : hauteur connue, sinon tirée de la
+   45 s ; s'il l'est encore, les tuiles toujours à l'écran sont redemandées seules au bout de 1, 2, 4 puis toutes les
+   8 minutes, sans recalcul tant qu'il refuse). Chaque arbre devient un houppier en ellipsoïde posé sur un tronc : hauteur connue, sinon tirée de la
    circonférence, sinon 10 m ; houppier de 0,6 fois la hauteur (2 à 16 m) s'il n'est pas noté, à partir du tiers de la
    hauteur (1,5 à 5 m). Son ombre est calculée après le balayage, cellule par cellule, en lançant le rayon de soleil
    depuis la surface (sol ou toit) : elle se détache du pied quand le soleil baisse, comme sous un vrai arbre. En 3D, un
@@ -243,8 +244,9 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - Arbres isolés : à partir du zoom 15 seulement, et seulement ceux de la vue et de 250 m autour. Hors de Paris, seuls
   les arbres notés dans OpenStreetMap existent : beaucoup de villes sont bien couvertes, la campagne et les jardins privés
   beaucoup moins. Leur hauteur y manque souvent (10 m par défaut). Le premier passage sur un lieu attend Overpass
-  (souvent 20 à 60 s, parfois plus quand le serveur public est saturé ; « arbres en chargement… » s'affiche) ; les
-  passages suivants sont immédiats.
+  (souvent 20 à 60 s ; « arbres en chargement… » s'affiche) ; les passages suivants sont immédiats. Saturé, le serveur
+  public refuse parfois tout pendant de longues minutes : « arbres indisponibles, nouvel essai automatique » s'affiche,
+  et les arbres arrivent seuls dès qu'il répond.
 - Tous les arbres sont feuillus toute l'année et leur houppier est opaque : en hiver, sous un platane sans feuilles,
   l'ombre est en réalité bien plus légère. Le tronc ne porte pas d'ombre.
 - Un bois est vu d'en haut : sa cime est au soleil, son ombre tombe sur le terrain découvert voisin. Un point posé dans un

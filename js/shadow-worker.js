@@ -235,7 +235,7 @@ async function buildHeightfield(msg) {
     id,
     stats: {
       tilesLoaded, tilesMissing, buildings: touched, wooded: canopyCells / (w * h), minH, maxH, w, h, terrainUnsupported,
-      trees: current.trees ? current.trees.n : 0, treesLoading: !!info.loading, treesFailed: !!info.failed,
+      trees: current.trees ? current.trees.n : 0, treesLoading: !!info.loading, treesFailed: !!info.failed, treesRetrying: !!info.retrying,
     },
   });
   if (mode === 'exposure') {

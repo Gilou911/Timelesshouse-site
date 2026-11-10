@@ -624,7 +624,7 @@ shadowMap.on('heightfield', (stats) => {
   if (stats.wooded > 0) parts.push(`bois\u00a0${Math.max(1, Math.round(stats.wooded * 100))}\u00a0%`); // insécable : jamais un « % » seul à la ligne
   if (stats.trees > 0) parts.push(`${stats.trees.toLocaleString('fr-FR')}\u00a0arbre${stats.trees > 1 ? 's' : ''}`);
   if (stats.treesLoading) parts.push('arbres en chargement…');
-  else if (stats.treesFailed) parts.push('arbres indisponibles pour l\'instant');
+  else if (stats.treesFailed) parts.push(stats.treesRetrying ? 'arbres indisponibles, nouvel essai automatique' : 'arbres indisponibles pour l\'instant');
   setStatus(parts.join(' · '));
   if (state.point) computeExposure();
 });

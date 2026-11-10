@@ -131,8 +131,61 @@ test('TreeStore : Paris et OpenStreetMap chargés en une requête chacun, doublo
     assert.equal(failed.failed, true);
     assert.equal(failed.trees.length, 0);
     assert.equal(failed.paris, false);
+    assert.equal(failed.retrying, false, 'requête refusée : pas de nouvel essai automatique');
     assert.equal(calls.filter((c) => c.url.startsWith('https://paris.test')).length, 1);
   } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('TreeStore : serveur saturé, nouvel essai seul pour les tuiles à l\'écran, un seul recalcul par série d\'échecs', async () => {
+  const origFetch = globalThis.fetch;
+  let calls = 0;
+  let failing = 4; // la première série (1 requête + 3 nouveaux essais rapprochés) échoue
+  globalThis.fetch = async () => {
+    calls++;
+    if (failing-- > 0) return new Response('# 502 at capacity', { status: 502 });
+    return new Response(JSON.stringify({ elements: [
+      { type: 't', geometry: { coordinates: [4.8302, 45.7578] }, tags: { h: '12' } },
+      { type: 't', geometry: { coordinates: [4.8306, 45.7579] }, tags: { h: '' } },
+    ] }), { status: 200 });
+  };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let updates = 0;
+  const store = new TreeStore({
+    parisUrl: 'https://paris.test/arbres', overpassUrl: 'https://overpass.test/api', onUpdate: () => updates++,
+    delays: { paris: 1, overpass: [1, 1, 1], auto: [40, 80] },
+  });
+  try {
+    const lyon = [4.83, 45.7575, 4.831, 45.758];
+    store.request(lyon);
+    for (let i = 0; i < 100 && !store.request(lyon).failed; i++) await wait(2);
+    const failed = store.request(lyon);
+    assert.equal(failed.failed, true);
+    assert.equal(failed.retrying, true);
+    assert.equal(calls, 4);
+    assert.equal(updates, 1);
+    // Sans toucher à la carte : nouvel essai seul au bout de 40 ms, les arbres arrivent, un recalcul de plus.
+    for (let i = 0; i < 100 && updates < 2; i++) await wait(5);
+    assert.equal(calls, 5);
+    const done = store.request(lyon);
+    assert.deepEqual([done.trees.length / 4, done.failed, done.retrying, done.loading], [2, false, false, false]);
+    assert.equal(updates, 2);
+
+    // Toujours saturé ailleurs : les essais se suivent, espacés, sans recalcul après le premier échec.
+    failing = Infinity;
+    const marseille = [5.37, 43.296, 5.371, 43.297];
+    store.request(marseille);
+    for (let i = 0; i < 100 && !store.request(marseille).failed; i++) await wait(2);
+    const before = calls;
+    await wait(200);
+    assert.ok(calls >= before + 4, `nouveaux essais : ${calls - before}`);
+    assert.equal(updates, 3, 'un seul recalcul pour toute la série d\'échecs');
+  } finally {
+    store.wanted = []; // plus rien à l'écran : la série s'arrête au prochain essai
+    clearTimeout(store.retryTimers.osm);
+    await wait(120);
+    clearTimeout(store.retryTimers.osm);
     globalThis.fetch = origFetch;
   }
 });

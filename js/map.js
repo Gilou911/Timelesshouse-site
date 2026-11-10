@@ -538,7 +538,7 @@ export class ShadowMap {
         buildings,
         trees,
         singleTrees: single.arrays,
-        treesInfo: { loading: single.loading, failed: single.failed },
+        treesInfo: { loading: single.loading, failed: single.failed, retrying: single.retrying },
         cellMeters,
         latCenter: center.lat,
         useTerrain: this.options.terrainShadows !== false,
@@ -560,7 +560,7 @@ export class ShadowMap {
   _singleTrees([vx0, vy0, vx1, vy1], gx0, gx1) {
     if (!this.options.trees || this.map.getZoom() < TREES_MIN_ZOOM) {
       this._setTreeFeatures(null);
-      return { arrays: null, loading: false, failed: false };
+      return { arrays: null, loading: false, failed: false, retrying: false };
     }
     const [w, n] = mercatorToLngLat(vx0, vy0);
     const [e, s] = mercatorToLngLat(vx1, vy1);
@@ -579,7 +579,7 @@ export class ShadowMap {
       arrays.h[i] = res.trees[4 * i + 2];
       arrays.d[i] = res.trees[4 * i + 3];
     }
-    return { arrays: count ? arrays : null, loading: res.loading, failed: res.failed };
+    return { arrays: count ? arrays : null, loading: res.loading, failed: res.failed, retrying: res.retrying };
   }
 
   _setTreeFeatures(list, key = null, paris = false) {
