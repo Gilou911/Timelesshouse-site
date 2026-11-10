@@ -164,7 +164,9 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    à moins de 30 s.
    Vérifié contre pvlib (NREL SPA) à mieux que 0,05°.
 2. **Champ de hauteurs** (`js/shadow-worker.js`) : pour la vue courante (plus une marge de 30 %), le worker télécharge
-   les tuiles de relief Terrarium, les échantillonne en bilinéaire, puis rasterise les emprises de bâtiments
+   les tuiles de relief Terrarium, adoucit leurs raccords (aux zooms 14 et 15, chaque tuile est un peu trop serrée, et la
+   marche d'un demi-pixel au raccord faisait une fausse ligne d'ombre droite sur les pentes : elle est répartie jusqu'au
+   milieu des deux tuiles), les échantillonne en bilinéaire, puis rasterise les emprises de bâtiments
    (hauteur `render_height` des tuiles OpenMapTiles) avec un toit plat posé sur le relief. Les bois et forêts (couche
    `landcover`, classe `wood`) suivent, en canopée de 15 m posée sur le sol nu, jamais sur un bâtiment. Ils vont dans le
    champ des hauteurs `H`, jamais dans le relief seul `T` que le balayage lit au point exact du rayon.
@@ -209,6 +211,8 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - Les bâtiments n'existent dans les tuiles qu'à partir du zoom 13 ; en dessous, seules les ombres du relief sont calculées.
 - La hauteur des bâtiments vient d'OpenStreetMap : souvent estimée (niveaux × 3 m), parfois absente (6 m par défaut).
 - Le relief a une résolution de 30 m environ (mieux en Europe) : les ombres fines des petits reliefs sont lissées.
+- Le long du méridien de Greenwich, des tuiles de relief des zooms 14 et 15 sont vides (0 m), à Gavarnie par exemple :
+  les ombres du relief y sont fausses dès le zoom 14 de la carte (justes au zoom 13 et en dessous).
 - Sur la carte, seuls le relief, les bâtiments et les bois de la zone calculée (la vue et 30 % autour) portent ombre : en
   montagne, l'ombre d'un sommet hors de la vue manque. Les mesures d'un point (jour, année, façade) comptent en plus le
   relief jusqu'à 20 km, à 55 m près ; les bâtiments et les arbres plus lointains n'y entrent pas.

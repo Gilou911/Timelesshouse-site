@@ -424,3 +424,67 @@ test('horizon lointain : une crête à 5 km au sud cache le soleil bas, pas le s
   assert.deepEqual(Array.from(pointExposure(H, w, h, 5, 5, samples, 1, 1.5, null, { horizon: profile })), [0, 1, 1, 0]);
   assert.deepEqual(Array.from(pointExposure(H, w, h, 5, 5, samples, 1, 1.5)), [1, 1, 1, 1], 'sans horizon : tout est éclairé');
 });
+
+test('raccords de tuiles : la marche du relief est répartie, plus de fausse ligne d\'ombre', () => {
+  // Plan qui monte de 4 m par pixel (de 10 m) vers le sud et vers l'est, dans 3 × 3 tuiles serrées chacune d'un
+  // demi-pixel, comme les tuiles Terrarium agrandies : à chaque raccord, la hauteur saute de 1,5 pente au lieu d'une.
+  const ts = 32;
+  const n = 3;
+  const W = n * ts;
+  const at = (j) => 0.75 + (j * (ts - 1.5)) / (ts - 1); // position vraie du pixel j dans sa tuile
+  const build = () => {
+    const m = new DemMosaic(0, 0, n, n, ts);
+    for (let ty = 0; ty < n; ty++) {
+      for (let tx = 0; tx < n; tx++) {
+        const tile = new Float32Array(ts * ts);
+        for (let y = 0; y < ts; y++) for (let x = 0; x < ts; x++) tile[y * ts + x] = 500 + 4 * (tx * ts + at(x)) + 4 * (ty * ts + at(y));
+        m.setTile(tx, ty, tile);
+      }
+    }
+    return m;
+  };
+  const raw = build().data;
+  const m = build();
+  m.smoothSeams();
+  const d = m.data;
+  for (const t of [3, 40, 90]) {
+    const across = (i, step) => Math.abs(d[i] - d[i - step] - (d[i - step] - d[i - 2 * step]));
+    assert.ok(across(t * W + ts, 1) < 0.1, `raccord vertical, ligne ${t} : marche de ${across(t * W + ts, 1)} m`);
+    assert.ok(across(2 * ts * W + t, W) < 0.1, `raccord horizontal, colonne ${t} : marche de ${across(2 * ts * W + t, W)} m`);
+  }
+  assert.equal(d[0], raw[0], 'bord extérieur intact');
+  assert.equal(d[W * W - 1], raw[W * W - 1], 'bord extérieur intact');
+
+  // Soleil à 25° au sud puis à l'est : le plan (pente de 22°) est éclairé ; brute, la marche y faisait une ligne d'ombre.
+  const depth = new Float32Array(W * W);
+  const shaded = (T, az) => {
+    sweepShadows(T, W, W, az, 25, 10, depth, null, T);
+    return depth.reduce((s, v) => s + (v > 0), 0);
+  };
+  for (const az of [180, 90]) {
+    assert.ok(shaded(raw, az) > 0, `azimut ${az} : sans lissage, la ligne d'ombre doit apparaître (sinon le test ne prouve rien)`);
+    assert.equal(shaded(d, az), 0, `azimut ${az} : ombre sur un plan éclairé`);
+  }
+});
+
+test('raccords de tuiles : rien à côté d\'une tuile vide ou manquante, et le relief rugueux n\'est pas étiré en stries', () => {
+  const ts = 32;
+  const W = 4 * ts;
+  const noise = (i) => {
+    const s = Math.sin(i * 12.9898) * 43758.5453;
+    return s - Math.floor(s);
+  };
+  const m = new DemMosaic(0, 0, 4, 1, ts);
+  // Relief rugueux : pente de 3 m par pixel vers l'est, et 6 m de bruit.
+  for (const tx of [0, 1]) m.setTile(tx, 0, Float32Array.from({ length: ts * ts }, (_, i) => 800 + 3 * (tx * ts + (i % ts)) + 6 * noise(i + tx * ts * ts)));
+  m.setTile(2, 0, new Float32Array(ts * ts)); // tuile vide, à 0 m (Terrarium en sert, à Gavarnie par exemple)
+  const before = Float32Array.from(m.data);
+  m.smoothSeams(); // falaise de 900 m au raccord 1 | 2, tuile 3 manquante : seul le raccord 0 | 1 est lissé
+  for (let y = 0; y < ts; y++) {
+    for (let x = ts + ts / 2; x < W; x++) assert.equal(m.data[y * W + x], before[y * W + x], `(${x}, ${y}) : loin du seul raccord lissé`);
+  }
+  // Ligne par ligne, le bruit ferait retoucher le relief de 2,9 m ; moyenné le long du raccord, de moins de 0,5 m.
+  let most = 0;
+  for (let i = 0; i < before.length; i++) most = Math.max(most, Math.abs(m.data[i] - before[i]));
+  assert.ok(most < 1.2, `relief rugueux retouché de ${most} m`);
+});

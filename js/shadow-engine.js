@@ -54,6 +54,8 @@ export function decodeTerrarium(rgba, out) {
   return heights;
 }
 
+const SEAM_WINDOW = 8; // voir DemMosaic.smoothSeams
+
 /**
  * Mosaïque de tuiles DEM contiguës (même zoom) avec échantillonnage bilinéaire.
  * Les coordonnées d'échantillonnage sont en pixels de la mosaïque (0,0 = coin haut-gauche de la tuile tx0,ty0).
@@ -125,6 +127,56 @@ export class DemMosaic {
       }
     }
     return n;
+  }
+
+  /**
+   * Adoucit les raccords entre deux tuiles chargées voisines. Aux zooms 14 et 15, les tuiles Terrarium sont agrandies
+   * depuis un relief plus grossier, chacune un peu trop serrée : d'un côté à l'autre d'un raccord, la hauteur varie de
+   * 1,2 à 1,8 fois la pente locale, comme s'il manquait un demi-pixel de terrain. Le balayage y voyait un petit mur,
+   * d'où une fausse ligne d'ombre droite. Sur chaque ligne qui traverse un raccord, l'excès sur la pente voisine est
+   * réparti en rampe jusqu'au milieu des deux tuiles : une rampe courte raidirait la pente en bande le long du raccord.
+   * L'excès est moyenné sur ±SEAM_WINDOW pixels le long du raccord : sur un relief fin (natif), il n'est que du bruit,
+   * à ne pas étirer en stries. Les tuiles comblées (fillUnfilled) ne sont pas lissées.
+   */
+  smoothSeams() {
+    const ts = this.tileSize;
+    const w = this.width;
+    const d = this.data;
+    const half = ts >> 1;
+    const excess = new Float32Array(ts);
+    for (const vertical of [true, false]) {
+      const step = vertical ? 1 : w; // d'un pixel au suivant, en travers du raccord
+      for (let ty = this.ty0; ty < this.ty0 + this.ny; ty++) {
+        for (let tx = this.tx0; tx < this.tx0 + this.nx; tx++) {
+          if (!this.filledKeys.has(`${tx}/${ty}`) || !this.filledKeys.has(vertical ? `${tx + 1}/${ty}` : `${tx}/${ty + 1}`)) continue;
+          const ox = (tx - this.tx0) * ts;
+          const oy = (ty - this.ty0) * ts;
+          const first = (t) => (vertical ? (oy + t) * w + ox + ts : (oy + ts) * w + ox + t); // 1er pixel après le raccord
+          for (let t = 0; t < ts; t++) {
+            const i = first(t);
+            const b = d[i - step];
+            const c = d[i];
+            const slope = (b - d[i - 2 * step] + d[i + step] - c) / 2;
+            // Plus grand que la pente voisine, ce n'est plus la marche d'un raccord : une falaise, ou une tuile vide
+            // (Terrarium en sert, à 0 m), qu'il ne faut pas étaler sur la tuile d'à côté.
+            excess[t] = Math.abs(c - b - slope) <= Math.abs(slope) ? c - b - slope : 0;
+          }
+          for (let t = 0; t < ts; t++) {
+            const u0 = Math.max(0, t - SEAM_WINDOW);
+            const u1 = Math.min(ts - 1, t + SEAM_WINDOW);
+            let sum = 0;
+            for (let u = u0; u <= u1; u++) sum += excess[u];
+            const e = sum / (u1 - u0 + 1) / 2; // moitié de la marche, retirée de chaque côté
+            const i = first(t);
+            for (let k = 0; k < half; k++) {
+              const f = e * (1 - k / half);
+              d[i + k * step] -= f;
+              d[i - (k + 1) * step] += f;
+            }
+          }
+        }
+      }
+    }
   }
 
   /** Échantillon bilinéaire aux coordonnées pixel (px, py) ; les bords sont prolongés. */

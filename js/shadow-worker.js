@@ -196,6 +196,7 @@ async function buildHeightfield(msg) {
     }
     await runPool(tasks, CONCURRENCY);
     if (token !== hfToken) return; // une demande plus récente a pris le relais
+    mosaic.smoothSeams(); // sinon, une fausse ligne d'ombre au raccord de deux tuiles, sur les pentes
     if (tilesMissing > 0) mosaic.fillUnfilled(); // comblées à la hauteur moyenne des tuiles chargées
     fillTerrain(T, grid, mosaic, demZoom);
   }
