@@ -154,8 +154,8 @@ const CACHE_NAME = 'ombres-arbres-1';
 const CACHE_DAYS = 30;
 const RETRY_FAILED_MS = 120000; // une tuile en échec est redemandée deux minutes plus tard, si on y revient
 const OVERPASS_WAITS = [5000, 15000, 45000]; // serveur public saturé : il demande d'attendre de plus en plus
-// Le premier serveur Overpass répond d'habitude en 1 à 4 s : au-delà de 20 s, le suivant prend le relais.
-// shortcut: un premier serveur muet coûte 20 s à chaque requête ; s'il le reste, l'écarter pour la session.
+// Plusieurs serveurs Overpass : au-delà de 20 s sans réponse de l'un, le suivant prend le relais (le dernier a 100 s).
+// shortcut: un serveur muet coûte 20 s à chaque requête ; s'il le reste, l'écarter pour la session.
 const FIRST_SERVER_MS = 20000;
 // Serveur saturé ou injoignable : les tuiles encore à l'écran sont redemandées seules, de plus en plus espacées.
 const AUTO_RETRY_MS = [60000, 120000, 240000, 480000];

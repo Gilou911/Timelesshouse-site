@@ -6,10 +6,10 @@ import { TreesLayer } from './trees3d.js';
 const CFG = (typeof window !== 'undefined' && window.OMBRES_CONFIG) || {};
 export const DEM_URL = CFG.demUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 export const OFM = CFG.openFreeMap || 'https://tiles.openfreemap.org';
-// Arbres isolés : la liste de la Ville de Paris (dans Paris), et OpenStreetMap partout par deux serveurs Overpass publics :
-// celui d'OpenStreetMap France répond en quelques secondes ; overpass-api.de, plus lent, prend le relais s'il échoue.
+// Arbres isolés : la liste de la Ville de Paris (dans Paris), et OpenStreetMap partout par le serveur public Overpass.
+// overpass.openstreetmap.fr, essayé le 10/11/2026, refuse les sites publics (« usages autorisés » seulement).
 const PARIS_TREES_URL = CFG.parisTreesUrl || 'https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/les-arbres/exports/json';
-const OVERPASS_URLS = CFG.overpassUrls || ['https://overpass.openstreetmap.fr/api/interpreter', 'https://overpass-api.de/api/interpreter'];
+const OVERPASS_URLS = CFG.overpassUrls || ['https://overpass-api.de/api/interpreter'];
 const OSM_LINK = '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 const TREES_ATTRIBUTION = {
   paris: `Arbres : <a href="https://opendata.paris.fr/explore/dataset/les-arbres/" target="_blank" rel="noopener">Ville de Paris</a>, ${OSM_LINK}`,
