@@ -29,6 +29,7 @@ const browser = await chromium.launch({
 });
 const failures = [];
 const consoleErrors = [];
+const overpassCalls = []; // chemins des serveurs Overpass factices, dans l'ordre des requêtes
 
 async function openPage({ viewport, hash, mobile = false, planStyle, satelliteStyle, config = {}, setup }) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, isMobile: mobile, hasTouch: mobile, locale: 'fr-FR', timezoneId: 'Europe/Paris' });
@@ -38,7 +39,8 @@ async function openPage({ viewport, hash, mobile = false, planStyle, satelliteSt
     if (msg.type() === 'error' && !/glyph|font|favicon/i.test(msg.text())) consoleErrors.push(`console: ${msg.text()}`);
   });
   page.on('request', (r) => {
-    if (/opendata\.paris\.fr|overpass-api\.de/.test(r.url())) consoleErrors.push(`requête vers un vrai serveur d'arbres : ${r.url()}`);
+    if (/opendata\.paris\.fr|overpass-api\.de|overpass\.openstreetmap\.fr/.test(r.url())) consoleErrors.push(`requête vers un vrai serveur d'arbres : ${r.url()}`);
+    if (/\/mock\/overpass/.test(r.url())) overpassCalls.push(new URL(r.url()).pathname);
   });
   await page.addInitScript(
     ({ b, planStyle, satelliteStyle, config }) => {
@@ -47,9 +49,10 @@ async function openPage({ viewport, hash, mobile = false, planStyle, satelliteSt
         planStyle: planStyle || `${b}/mock/style.json`,
         satelliteStyle: satelliteStyle || `${b}/mock/style.json`,
         openFreeMap: b,
-        // Arbres isolés : serveurs factices, jamais les vrais (Ville de Paris, Overpass).
+        // Arbres isolés : serveurs factices, jamais les vrais (Ville de Paris, Overpass). Le premier serveur Overpass
+        // renvoie une réponse coupée : chaque chargement passe par le relais du second.
         parisTreesUrl: `${b}/mock/paris-trees`,
-        overpassUrl: `${b}/mock/overpass`,
+        overpassUrls: [`${b}/mock/overpass-cut`, `${b}/mock/overpass`],
         ...config,
       };
     },
@@ -717,10 +720,13 @@ await scenario('Point 3 : arbres, année, façades 3D, vidéo', async () => {
 
 await scenario('Arbres isolés : Ville de Paris et OpenStreetMap, volumes 3D, ombres rondes', async () => {
   // Juin, 14 h : soleil au sud-ouest à 58°. Vue sur les arbres factices, entre le damier et le bois.
+  overpassCalls.length = 0;
   const { page, context } = await openPage({ viewport: { width: 1280, height: 800 }, hash: '#48.8566/2.35950/17?d=2026-06-21&t=14:00' });
   await waitForFrame(page, 1);
   // 5 arbres de la Ville, 2 d'OpenStreetMap (le 3e est un doublon), 14 dans l'alignement de 104 m.
   await page.waitForFunction(() => window.__ombres.stats && window.__ombres.stats.trees === 21 && !window.__ombres.stats.treesLoading, null, { timeout: 30000 });
+  // Réponse coupée du premier serveur Overpass : écartée, le second a servi (et rien de vide n'a été gardé).
+  assert.deepEqual(overpassCalls.slice(0, 2), ['/mock/overpass-cut', '/mock/overpass']);
   assert.match(await page.textContent('#status'), /21\u00a0arbres/);
   const fc = await page.evaluate(() => {
     const sm = window.__ombres.shadowMap;
@@ -783,6 +789,10 @@ await scenario('Arbres isolés : Ville de Paris et OpenStreetMap, volumes 3D, om
   assert.equal(await page.evaluate(() => window.__ombres.shadowMap._treesLayer.visible), false);
   assert.equal(await greenAtTrees(), 0, 'plus de houppiers');
   assert.doesNotMatch(await page.textContent('#status'), /arbres/);
+  // Arbres remis, 3 km plus au nord où aucun n'est cartographié : la ligne d'état le dit (et pas « en chargement »).
+  await page.click('label:has(#toggle-trees)');
+  await page.evaluate(() => window.__ombres.shadowMap.map.jumpTo({ center: [2.3522, 48.8836], zoom: 17 }));
+  await page.waitForFunction(() => /aucun arbre cartographié ici/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
   await context.close();
 });
 

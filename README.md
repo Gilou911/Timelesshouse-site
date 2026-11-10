@@ -117,11 +117,12 @@ L'application tient dans une politique de sécurité de contenu stricte. Celle-c
 vrais serveurs de tuiles : plan, bâtiments, relief, satellite et recherche de lieu.
 
 ```
-Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; connect-src 'self' https://tiles.openfreemap.org https://s3.amazonaws.com https://server.arcgisonline.com https://nominatim.openstreetmap.org https://opendata.paris.fr https://overpass-api.de
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; connect-src 'self' https://tiles.openfreemap.org https://s3.amazonaws.com https://server.arcgisonline.com https://nominatim.openstreetmap.org https://opendata.paris.fr https://overpass.openstreetmap.fr https://overpass-api.de
 ```
 
-- `opendata.paris.fr` et `overpass-api.de` servent les arbres isolés (Ville de Paris, OpenStreetMap). Sans eux, la carte
-  marche, mais sans arbres isolés (les bois restent).
+- `opendata.paris.fr` sert les arbres isolés de la Ville de Paris ; `overpass.openstreetmap.fr` (OpenStreetMap France),
+  puis `overpass-api.de` en secours, ceux d'OpenStreetMap. Sans eux, la carte marche, mais sans arbres isolés (les bois
+  restent).
 
 - `worker-src blob:` est obligatoire : MapLibre lance ses workers depuis une URL `blob:`. Sans lui, ils sont bloqués.
 - Envoyez l'en-tête sur la page et sur les fichiers de `js/` : le worker des ombres applique la politique reçue avec
@@ -188,10 +189,12 @@ avant `js/app.js`. Toutes les clés sont facultatives.
    manquantes : à la Ville de Paris (jeu « les-arbres », hauteur et circonférence de chaque arbre) quand la tuile touche
    Paris, et partout à OpenStreetMap par Overpass (`natural=tree`, hauteur, diamètre du houppier ou circonférence quand
    ils sont notés ; `natural=tree_row`, un arbre tous les 8 m). Un arbre d'OpenStreetMap à moins de 3 m d'un arbre de la
-   Ville est le même et n'est pas compté deux fois. Les tuiles reçues sont gardées 30 jours dans le cache du navigateur :
-   Overpass met souvent 20 s ou plus à répondre, et demande d'attendre quand il est saturé (nouvel essai après 5, 15 puis
-   45 s ; s'il l'est encore, les tuiles toujours à l'écran sont redemandées seules au bout de 1, 2, 4 puis toutes les
-   8 minutes, sans recalcul tant qu'il refuse). Chaque arbre devient un houppier en ellipsoïde posé sur un tronc : hauteur connue, sinon tirée de la
+   Ville est le même et n'est pas compté deux fois. Deux serveurs Overpass publics sont essayés dans l'ordre : celui
+   d'OpenStreetMap France répond d'habitude en 1 à 4 s, avec des données parfois vieilles de quelques semaines ; s'il
+   échoue, se tait plus de 20 s ou renvoie une réponse coupée (`remark` d'erreur, jamais gardée), overpass-api.de, à jour
+   mais souvent 20 s ou plus, prend le relais. Les tuiles reçues sont gardées 30 jours dans le cache du navigateur. Les
+   deux saturés : nouvel essai après 5, 15 puis 45 s ; s'ils le sont encore, les tuiles toujours à l'écran sont
+   redemandées seules au bout de 1, 2, 4 puis toutes les 8 minutes, sans recalcul tant qu'ils refusent. Chaque arbre devient un houppier en ellipsoïde posé sur un tronc : hauteur connue, sinon tirée de la
    circonférence, sinon 10 m ; houppier de 0,6 fois la hauteur (2 à 16 m) s'il n'est pas noté, à partir du tiers de la
    hauteur (1,5 à 5 m). Son ombre est calculée après le balayage, cellule par cellule, en lançant le rayon de soleil
    depuis la surface (sol ou toit) : elle se détache du pied quand le soleil baisse, comme sous un vrai arbre. En 3D
@@ -224,7 +227,7 @@ avant `js/app.js`. Toutes les clés sont facultatives.
 | Relief | [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) sur AWS Open Data (Mapzen : SRTM, EU-DEM, etc.) | Ouvert, attribution affichée |
 | Recherche de lieu | [Nominatim](https://nominatim.org) | Usage léger : une requête par recherche validée, jamais d'autocomplétion |
 | Arbres isolés à Paris | [Les arbres](https://opendata.paris.fr/explore/dataset/les-arbres/), Ville de Paris (opendata.paris.fr) | ODbL, crédit « Ville de Paris » affiché quand ses arbres sont à l'écran |
-| Arbres isolés ailleurs | OpenStreetMap par [Overpass API](https://overpass-api.de) (serveur public) | ODbL ; serveur prévu pour un usage humain depuis le navigateur, réponses gardées 30 jours pour le ménager |
+| Arbres isolés ailleurs | OpenStreetMap par Overpass : serveur de l'association [OpenStreetMap France](https://www.openstreetmap.fr) (overpass.openstreetmap.fr), puis [overpass-api.de](https://overpass-api.de) en secours (serveurs publics) | ODbL ; serveurs prévus pour un usage humain depuis le navigateur, réponses gardées 30 jours pour les ménager |
 | Fuseaux horaires | [@photostructure/tz-lookup](https://github.com/photostructure/tz-lookup) (CC0, données tz 2025), embarqué dans `vendor/` | — |
 | Carte | [MapLibre GL JS](https://maplibre.org) 5, embarqué dans `vendor/` | BSD-3 |
 
@@ -246,10 +249,12 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
   arbres isolés listés (Ville de Paris, OpenStreetMap) portent ombre.
 - Arbres isolés : à partir du zoom 15 seulement, et seulement ceux de la vue et de 250 m autour. Hors de Paris, seuls
   les arbres notés dans OpenStreetMap existent : beaucoup de villes sont bien couvertes, la campagne et les jardins privés
-  beaucoup moins. Leur hauteur y manque souvent (10 m par défaut). Le premier passage sur un lieu attend Overpass
-  (souvent 20 à 60 s ; « arbres en chargement… » s'affiche) ; les passages suivants sont immédiats. Saturé, le serveur
-  public refuse parfois tout pendant de longues minutes : « arbres indisponibles, nouvel essai automatique » s'affiche,
-  et les arbres arrivent seuls dès qu'il répond.
+  beaucoup moins ; quand la vue n'en compte aucun, « aucun arbre cartographié ici » s'affiche. Leur hauteur y manque
+  souvent (10 m par défaut), et un arbre ajouté depuis quelques semaines peut manquer (données du serveur d'OpenStreetMap
+  France). Le premier passage sur un lieu attend le serveur (quelques secondes, 20 à 60 s quand overpass-api.de prend le
+  relais ; « arbres en chargement… » s'affiche) ; les passages suivants sont immédiats. Saturés, les serveurs publics
+  refusent parfois tout pendant de longues minutes : « arbres indisponibles, nouvel essai automatique » s'affiche, et les
+  arbres arrivent seuls dès qu'ils répondent.
 - Tous les arbres sont feuillus toute l'année et leur houppier est opaque : en hiver, sous un platane sans feuilles,
   l'ombre est en réalité bien plus légère. Le tronc ne porte pas d'ombre.
 - Un bois est vu d'en haut : sa cime est au soleil, son ombre tombe sur le terrain découvert voisin. Un point posé dans un

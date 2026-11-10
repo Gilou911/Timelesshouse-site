@@ -163,7 +163,7 @@ export function startServer(port = 0, { injectConfig = false } = {}) {
       // Mode « npm run serve » : la page pointe vers le style factice et le relais de relief local.
       const cfg = {
         demUrl: `${base}/dem/{z}/{x}/{y}.png`, planStyle: `${base}/mock/ofm/bright.json`, satelliteStyle: `${base}/mock/style.json`, openFreeMap: `${base}/mock/ofm`,
-        parisTreesUrl: `${base}/mock/paris-trees`, overpassUrl: `${base}/mock/overpass`,
+        parisTreesUrl: `${base}/mock/paris-trees`, overpassUrls: [`${base}/mock/overpass`],
       };
       const html = readFileSync(join(ROOT, 'index.html'), 'utf8').replace('<script src="vendor/maplibre-gl.js', `<script>window.OMBRES_CONFIG = ${JSON.stringify(cfg)};</script>\n  <script src="vendor/maplibre-gl.js`);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -173,13 +173,15 @@ export function startServer(port = 0, { injectConfig = false } = {}) {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       return res.end(JSON.stringify(parisTreesResponse(url.searchParams.get('where'))));
     }
-    if (url.pathname === '/mock/overpass') {
+    if (url.pathname === '/mock/overpass' || url.pathname === '/mock/overpass-cut') {
       let body = '';
       req.on('data', (c) => { body += c; });
       req.on('end', () => {
         const data = new URLSearchParams(body).get('data');
         res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify(overpassResponse(data)));
+        // overpass-cut : un premier serveur dont la réponse est coupée (délai dépassé chez lui) ; le second prend le relais.
+        const cut = { version: 0.6, elements: [], remark: 'runtime error: Query timed out in "query" at line 1 after 90 seconds.' };
+        res.end(JSON.stringify(url.pathname === '/mock/overpass-cut' ? cut : overpassResponse(data)));
       });
       return undefined;
     }

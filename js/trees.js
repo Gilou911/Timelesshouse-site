@@ -154,6 +154,9 @@ const CACHE_NAME = 'ombres-arbres-1';
 const CACHE_DAYS = 30;
 const RETRY_FAILED_MS = 120000; // une tuile en échec est redemandée deux minutes plus tard, si on y revient
 const OVERPASS_WAITS = [5000, 15000, 45000]; // serveur public saturé : il demande d'attendre de plus en plus
+// Le premier serveur Overpass répond d'habitude en 1 à 4 s : au-delà de 20 s, le suivant prend le relais.
+// shortcut: un premier serveur muet coûte 20 s à chaque requête ; s'il le reste, l'écarter pour la session.
+const FIRST_SERVER_MS = 20000;
 // Serveur saturé ou injoignable : les tuiles encore à l'écran sont redemandées seules, de plus en plus espacées.
 const AUTO_RETRY_MS = [60000, 120000, 240000, 480000];
 // Saturé (429, 502, 503, 504) ou réseau (pas de statut) : on peut réessayer ; une autre erreur est définitive.
@@ -175,13 +178,14 @@ async function fetchJSON(url, init, timeoutMs) {
  * Charge les arbres par tuile, les garde en mémoire et dans le cache du navigateur (30 jours : Overpass met souvent
  * plus de 20 s à répondre). Une seule requête par source à la fois, sur l'emprise de toutes les tuiles manquantes.
  * `onUpdate()` est appelé à chaque arrivée (ou au premier échec), pour recalculer. Serveur saturé : nouvel essai seul
- * au bout de 1, 2, 4 puis toutes les 8 minutes, pour les tuiles encore à l'écran. `delays` : attentes (tests).
+ * au bout de 1, 2, 4 puis toutes les 8 minutes, pour les tuiles encore à l'écran. `overpassUrls` : serveurs Overpass
+ * dans l'ordre où on les essaie. `delays` : attentes (tests).
  */
 export class TreeStore {
-  constructor({ parisUrl, overpassUrl, onUpdate, delays = {} }) {
-    this.urls = { paris: parisUrl, osm: overpassUrl };
+  constructor({ parisUrl, overpassUrls, onUpdate, delays = {} }) {
+    this.urls = { paris: parisUrl, osm: overpassUrls };
     this.onUpdate = onUpdate;
-    this.delays = { paris: 3000, overpass: OVERPASS_WAITS, auto: AUTO_RETRY_MS, ...delays };
+    this.delays = { paris: 3000, overpass: OVERPASS_WAITS, auto: AUTO_RETRY_MS, firstServer: FIRST_SERVER_MS, ...delays };
     this.tiles = new Map(); // "x/y" → { paris, osm } : tableau d'arbres, 'cache', 'queued', 'loading' ou { failed: t }
     this.busy = { paris: false, osm: false };
     this.failures = { paris: 0, osm: 0 }; // échecs de suite, par source
@@ -394,16 +398,25 @@ export class TreeStore {
     }
   }
 
+  /** Serveurs Overpass essayés dans l'ordre, le premier qui répond l'emporte ; tous saturés : attente, puis nouveau tour. */
   async _overpass(bounds) {
     const body = `data=${encodeURIComponent(overpassQuery(bounds))}`;
     const init = { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }, body };
+    const urls = this.urls.osm;
     for (let attempt = 0; ; attempt++) {
-      try {
-        return osmTrees(await fetchJSON(this.urls.osm, init, 100000));
-      } catch (err) {
-        if (!isBusy(err) || attempt >= this.delays.overpass.length) throw err;
-        await new Promise((r) => setTimeout(r, this.delays.overpass[attempt]));
+      let error = null;
+      for (let i = 0; i < urls.length; i++) {
+        try {
+          const json = await fetchJSON(urls[i], init, i < urls.length - 1 ? this.delays.firstServer : 100000);
+          // Réponse coupée (délai ou mémoire dépassés chez le serveur) : incomplète, elle ne doit pas être gardée 30 jours.
+          if (/error/i.test(json.remark || '')) throw new Error(json.remark);
+          return osmTrees(json);
+        } catch (err) {
+          if (!error || isBusy(err)) error = err; // un serveur saturé l'emporte : on pourra réessayer
+        }
       }
+      if (!isBusy(error) || attempt >= this.delays.overpass.length) throw error;
+      await new Promise((r) => setTimeout(r, this.delays.overpass[attempt]));
     }
   }
 }

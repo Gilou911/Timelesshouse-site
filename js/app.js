@@ -625,6 +625,7 @@ shadowMap.on('heightfield', (stats) => {
   if (stats.trees > 0) parts.push(`${stats.trees.toLocaleString('fr-FR')}\u00a0arbre${stats.trees > 1 ? 's' : ''}`);
   if (stats.treesLoading) parts.push('arbres en chargement…');
   else if (stats.treesFailed) parts.push(stats.treesRetrying ? 'arbres indisponibles, nouvel essai automatique' : 'arbres indisponibles pour l\'instant');
+  else if (stats.treesWanted && !stats.trees) parts.push('aucun arbre cartographié ici'); // sinon, rien ne dit que la liste est vide
   setStatus(parts.join(' · '));
   if (state.point) computeExposure();
 });

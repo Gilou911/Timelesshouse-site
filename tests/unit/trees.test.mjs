@@ -119,7 +119,7 @@ test('TreeStore : Paris et OpenStreetMap chargés en une requête chacun, doublo
   };
   try {
     let updates = 0;
-    const store = new TreeStore({ parisUrl: 'https://paris.test/arbres', overpassUrl: 'https://overpass.test/api', onUpdate: () => updates++ });
+    const store = new TreeStore({ parisUrl: 'https://paris.test/arbres', overpassUrls: ['https://overpass.test/api'], onUpdate: () => updates++ });
     const bounds = [2.351, 48.856, 2.354, 48.858];
     const first = store.request(bounds);
     assert.equal(first.loading, true);
@@ -168,7 +168,7 @@ test('TreeStore : serveur saturé, nouvel essai seul pour les tuiles à l\'écra
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   let updates = 0;
   const store = new TreeStore({
-    parisUrl: 'https://paris.test/arbres', overpassUrl: 'https://overpass.test/api', onUpdate: () => updates++,
+    parisUrl: 'https://paris.test/arbres', overpassUrls: ['https://overpass.test/api'], onUpdate: () => updates++,
     delays: { paris: 1, overpass: [1, 1, 1], auto: [40, 80] },
   });
   try {
@@ -201,6 +201,52 @@ test('TreeStore : serveur saturé, nouvel essai seul pour les tuiles à l\'écra
     clearTimeout(store.retryTimers.osm);
     await wait(120);
     clearTimeout(store.retryTimers.osm);
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('TreeStore : le premier serveur Overpass d\'abord, le second prend le relais (saturé, muet, réponse coupée)', async () => {
+  const origFetch = globalThis.fetch;
+  const ONE_TREE = { elements: [{ type: 't', geometry: { coordinates: [4.8302, 45.7578] }, tags: { h: '12' } }] };
+  const reply = {
+    ok: () => new Response(JSON.stringify(ONE_TREE), { status: 200 }),
+    busy: () => new Response('# 504 Gateway Timeout', { status: 504 }),
+    refused: () => new Response('Forbidden', { status: 403 }),
+    // Délai dépassé chez le serveur : réponse 200 incomplète (ici vide), signalée par « remark ».
+    cut: () => new Response(JSON.stringify({ elements: [], remark: 'runtime error: Query timed out in "query" at line 1 after 91 seconds.' }), { status: 200 }),
+  };
+  let mode = {};
+  let calls = [];
+  globalThis.fetch = (url, init) => {
+    const server = String(url).startsWith('https://premier.test') ? 'premier' : 'second';
+    calls.push(server);
+    if (mode[server] === 'silent') return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('délai dépassé', 'AbortError'))));
+    return Promise.resolve(reply[mode[server]]());
+  };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const box = [4.83, 45.7575, 4.831, 45.758];
+  async function run(premier, second) {
+    mode = { premier, second };
+    calls = [];
+    const store = new TreeStore({
+      parisUrl: null, overpassUrls: ['https://premier.test/api', 'https://second.test/api'], onUpdate: () => {},
+      delays: { overpass: [1], auto: [60000], firstServer: 30 },
+    });
+    store.request(box);
+    for (let i = 0; i < 200 && store.request(box).loading; i++) await wait(2);
+    const res = store.request(box);
+    clearTimeout(store.retryTimers.osm);
+    return [res.trees.length / 4, res.failed, res.retrying, calls.join(' ')];
+  }
+  try {
+    assert.deepEqual(await run('ok', 'ok'), [1, false, false, 'premier']);
+    assert.deepEqual(await run('busy', 'ok'), [1, false, false, 'premier second']);
+    assert.deepEqual(await run('silent', 'ok'), [1, false, false, 'premier second'], 'premier muet : relais au bout du délai');
+    assert.deepEqual(await run('cut', 'ok'), [1, false, false, 'premier second'], 'une réponse coupée n\'est pas gardée');
+    // Les deux en échec : un serveur saturé laisse l'espoir (nouveaux essais), deux refus sont définitifs.
+    assert.deepEqual(await run('refused', 'busy'), [0, true, true, 'premier second premier second']);
+    assert.deepEqual(await run('refused', 'refused'), [0, true, false, 'premier second']);
+  } finally {
     globalThis.fetch = origFetch;
   }
 });

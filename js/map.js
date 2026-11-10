@@ -6,9 +6,10 @@ import { TreesLayer } from './trees3d.js';
 const CFG = (typeof window !== 'undefined' && window.OMBRES_CONFIG) || {};
 export const DEM_URL = CFG.demUrl || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 export const OFM = CFG.openFreeMap || 'https://tiles.openfreemap.org';
-// Arbres isolés : la liste de la Ville de Paris (dans Paris), et OpenStreetMap partout par le serveur public Overpass.
+// Arbres isolés : la liste de la Ville de Paris (dans Paris), et OpenStreetMap partout par deux serveurs Overpass publics :
+// celui d'OpenStreetMap France répond en quelques secondes ; overpass-api.de, plus lent, prend le relais s'il échoue.
 const PARIS_TREES_URL = CFG.parisTreesUrl || 'https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/les-arbres/exports/json';
-const OVERPASS_URL = CFG.overpassUrl || 'https://overpass-api.de/api/interpreter';
+const OVERPASS_URLS = CFG.overpassUrls || ['https://overpass.openstreetmap.fr/api/interpreter', 'https://overpass-api.de/api/interpreter'];
 const OSM_LINK = '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 const TREES_ATTRIBUTION = {
   paris: `Arbres : <a href="https://opendata.paris.fr/explore/dataset/les-arbres/" target="_blank" rel="noopener">Ville de Paris</a>, ${OSM_LINK}`,
@@ -127,7 +128,7 @@ export class ShadowMap {
     this.vectorSource = null;
     this.ready = false;
 
-    this.trees = new TreeStore({ parisUrl: PARIS_TREES_URL, overpassUrl: OVERPASS_URL, onUpdate: () => this._onTreesUpdate() });
+    this.trees = new TreeStore({ parisUrl: PARIS_TREES_URL, overpassUrls: OVERPASS_URLS, onUpdate: () => this._onTreesUpdate() });
     this._treesLayer = new TreesLayer('ombres-trees-3d');
     this._treesParis = false; // arbres de la Ville de Paris dans la vue : leur crédit est affiché
 
@@ -545,7 +546,7 @@ export class ShadowMap {
         buildings,
         trees,
         singleTrees: single.arrays,
-        treesInfo: { loading: single.loading, failed: single.failed, retrying: single.retrying },
+        treesInfo: { wanted: single.wanted, loading: single.loading, failed: single.failed, retrying: single.retrying },
         cellMeters,
         latCenter: center.lat,
         useTerrain: this.options.terrainShadows !== false,
@@ -567,7 +568,7 @@ export class ShadowMap {
   _singleTrees([vx0, vy0, vx1, vy1], gx0, gx1) {
     if (!this.options.trees || this.map.getZoom() < TREES_MIN_ZOOM) {
       this._setTreeFeatures(null);
-      return { arrays: null, loading: false, failed: false, retrying: false };
+      return { arrays: null, wanted: false, loading: false, failed: false, retrying: false };
     }
     const [w, n] = mercatorToLngLat(vx0, vy0);
     const [e, s] = mercatorToLngLat(vx1, vy1);
@@ -586,7 +587,7 @@ export class ShadowMap {
       arrays.h[i] = res.trees[4 * i + 2];
       arrays.d[i] = res.trees[4 * i + 3];
     }
-    return { arrays: count ? arrays : null, loading: res.loading, failed: res.failed, retrying: res.retrying };
+    return { arrays: count ? arrays : null, wanted: true, loading: res.loading, failed: res.failed, retrying: res.retrying };
   }
 
   _setTreeFeatures(list, key = null, paris = false) {
