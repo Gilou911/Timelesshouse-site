@@ -7,6 +7,7 @@ import {
 import { parseHash, buildHash, isValidDateISO, isValidTime, parsePlaces, addPlace } from './state.js';
 import { searchPlace } from './geocode.js';
 import { nearestWall, offsetLngLat, facadeLit, litIntervals } from './facade.js';
+import { moonPosition, moonTimes, moonPhase } from './moon.js';
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -25,6 +26,7 @@ const ui = {
   facadeOn: $('facade-on'), facade: $('facade'), facadeAz: $('facade-az'), facadeDir: $('facade-dir'), facadeNote: $('facade-note'),
   facadeHours: $('facade-hours'), facadeList: $('facade-list'), facadeBar: $('facade-bar'),
   placesHint: $('places-hint'), placeForm: $('place-form'), placeName: $('place-name'), placeError: $('place-error'), places: $('places'),
+  moonPhase: $('moon-phase'), moonrise: $('moonrise'), moonset: $('moonset'), moonLit: $('moon-lit'), moonPos: $('moon-pos'),
 };
 
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -189,12 +191,15 @@ function refreshDay() {
   // Frise du curseur : nuit, heure bleue, heure dorée, jour, en bandes nettes, de minuit à minuit (heure civile).
   const { y, mo, d } = dateParts();
   const next = new Date(Date.UTC(y, mo - 1, d + 1));
-  const bands = lightBands(
-    wallToUTC(state.tz, y, mo, d, 0, 0),
-    wallToUTC(state.tz, next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), 0, 0),
-    c.lat,
-    c.lng,
-  );
+  const dayStart = wallToUTC(state.tz, y, mo, d, 0, 0);
+  const dayEnd = wallToUTC(state.tz, next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), 0, 0);
+  const bands = lightBands(dayStart, dayEnd, c.lat, c.lng);
+
+  // Lune : lever et coucher du jour civil (le coucher peut précéder le lever).
+  const mt = moonTimes(dayStart, dayEnd, c.lat, c.lng);
+  const noMoonEvent = mt.alwaysUp ? 'toujours levée' : mt.alwaysDown ? 'toujours couchée' : 'aucun ce jour-là';
+  ui.moonrise.textContent = mt.rise ? t(mt.rise) : noMoonEvent;
+  ui.moonset.textContent = mt.set ? t(mt.set) : noMoonEvent;
   // Une bande s'arrête là où le pouce du curseur montre cette heure : 11 px (demi-pouce) + part du jour × (piste − 22 px).
   const at = (date) => {
     const f = Math.min(1, Math.max(0, minutesInDay(date) / 1439));
@@ -265,6 +270,11 @@ function refreshSun() {
   ui.altitudeNote.hidden = pos.altitude > 0;
   const ratio = shadowLength(1, pos.altitude);
   ui.shadowRatio.textContent = isFinite(ratio) ? `${ratio >= 100 ? '> 100' : ratio.toFixed(1).replace('.', ',')} × la hauteur` : 'aucune (nuit)';
+  const moon = moonPhase(t);
+  const mpos = moonPosition(t, c.lat, c.lng);
+  ui.moonPhase.textContent = moon.name;
+  ui.moonLit.textContent = `${Math.round(moon.fraction * 100)} %`;
+  ui.moonPos.textContent = mpos.altitude > 0 ? `${fmtDeg(mpos.azimuth)} ${cardinal(mpos.azimuth)} · ${fmtDeg(mpos.altitude, 1)} de haut` : 'sous l\'horizon';
   ui.timeLabel.textContent = formatMinutes(state.minutes);
   ui.tzLabel.textContent = `${tzLabel(state.tz, t)} · ${state.tz.replace(/_/g, ' ')}`;
   ui.tzLabel.title = state.tz;
