@@ -538,6 +538,84 @@ await scenario('Lecture (animation) et clavier', async () => {
   await context.close();
 });
 
+await scenario('Repérage : frise, lune, cérémonie et repérage, façade, hauteur, carnet de lieux', async () => {
+  const { page, context } = await openPage({ viewport: { width: 1280, height: 800 }, hash: '#48.8566/2.3522/17?d=2026-11-10&t=11:00' });
+  await waitForFrame(page, 1);
+  const st = () => page.evaluate(() => {
+    const s = window.__ombres.state;
+    return { date: s.date, minutes: s.minutes, facade: s.facade, height: s.height, point: s.point, event: s.event };
+  });
+  const setField = (sel, v) => page.evaluate(([s, val]) => {
+    const el = document.querySelector(s);
+    el.value = val;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, [sel, v]);
+
+  // Frise : bandes nettes, et les créneaux dans le panneau.
+  const frise = await page.evaluate(() => document.getElementById('time').style.getPropertyValue('--daylight'));
+  assert.ok(/--band-blue/.test(frise) && /--band-golden/.test(frise) && /--band-day/.test(frise), `frise : ${frise.slice(0, 160)}`);
+  assert.match(await page.textContent('#golden'), /^\d\d:\d\d–\u2060\d\d:\d\d\u00a0· \d\d:\d\d–\u2060\d\d:\d\d$/);
+  assert.match(await page.textContent('#blue'), /^\d\d:\d\d–/);
+  // Lune : le lendemain de la nouvelle lune du 9 novembre 2026.
+  assert.equal(await page.textContent('#moon-phase'), 'Nouvelle lune');
+  assert.match(await page.textContent('#moon-lit'), /^\d\u00a0%$/);
+  assert.match(await page.textContent('#moonrise'), /^0[89]:\d\d$/);
+
+  // Cérémonie : la vue y saute ; « Repérage » revient au jour quitté ; chacun garde son heure.
+  await setField('#event-time', '16:00');
+  await setField('#event-date', '2027-06-12');
+  assert.deepEqual(await st().then((s) => [s.date, s.minutes]), ['2027-06-12', 960]);
+  assert.ok(await page.isVisible('#moment'), 'segments Cérémonie | Repérage visibles');
+  await setTime(page, 17 * 60 + 30);
+  await page.click('label:has(input[name="moment"][value="scout"])');
+  assert.deepEqual(await st().then((s) => [s.date, s.minutes]), ['2026-11-10', 660], 'repérage : le jour et l\'heure quittés');
+  await page.click('label:has(input[name="moment"][value="event"])');
+  assert.deepEqual(await st().then((s) => [s.date, s.minutes]), ['2027-06-12', 1050], 'cérémonie : son heure gardée (17:30)');
+
+  // Façade : un point posé sur le toit de la tour, près de son mur sud, descend 3 m devant ce mur, orienté au sud.
+  const box = await page.evaluate(() => {
+    const m = window.__ombres.shadowMap.map;
+    const p = m.project([2.3522, 48.8566 - 16 / 111320]); // 16 m au sud du centre de la tour de 40 m
+    return { x: p.x, y: p.y };
+  });
+  await page.mouse.click(box.x, box.y);
+  await page.waitForFunction(() => window.__ombres.lastExposure && window.__ombres.lastExposure.lit, null, { timeout: 15000 });
+  await page.click('label:has(#facade-on)');
+  await page.waitForFunction(() => /de \d\d:\d\d à/.test(document.getElementById('facade-list').textContent), null, { timeout: 15000 });
+  const f = await st();
+  assert.ok(Math.abs(f.facade - 180) <= 2, `façade sud : ${f.facade}`);
+  const southOfWall = (48.8566 - f.point.lat) * 111320 - 20;
+  assert.ok(southOfWall > 2 && southOfWall < 4, `point descendu devant le mur sud : ${southOfWall.toFixed(1)} m`);
+  assert.match(await page.textContent('#facade-list'), /de \d\d:\d\d à \d\d:\d\d/);
+  const arrow = await page.evaluate(() => window.__ombres.shadowMap.map.querySourceFeatures('ombres-sunpath').some((x) => x.properties.kind === 'facade'));
+  assert.ok(arrow, 'flèche de la façade sur la carte');
+
+  // Hauteur du point : virgule acceptée, dans le texte et dans le lien.
+  await setField('#point-height', '7,5');
+  await page.waitForFunction(() => /mesuré à 7,5 m/.test(document.getElementById('exposure-meta').textContent), null, { timeout: 15000 });
+  await page.waitForTimeout(400);
+  assert.ok(/[?&]h=7\.5/.test(page.url()) && /[?&]f=180/.test(page.url()) && /ev=2027-06-12T16:00/.test(page.url()), page.url());
+
+  // Carnet : enregistré, puis rouvert depuis le champ de recherche vide après être parti ailleurs.
+  await page.fill('#place-name', 'Tour de test');
+  await page.press('#place-name', 'Enter');
+  assert.equal(await page.textContent('.places .place-open span'), 'Tour de test');
+  await page.goto(`${base}/#45.9237/6.8694/13?d=2026-11-10&t=11:00`);
+  await page.reload();
+  await waitForFrame(page, 1);
+  await page.click('#search-input');
+  await page.click('#results li:has-text("Tour de test")');
+  const back = await st();
+  assert.equal(back.facade, 180);
+  assert.equal(back.height, 7.5);
+  assert.equal(back.event && back.event.date, '2027-06-12');
+  assert.ok(Math.abs(back.point.lat - f.point.lat) < 1e-4, `point rouvert : ${JSON.stringify(back.point)}`);
+  const center = await page.evaluate(() => window.__ombres.shadowMap.map.getCenter());
+  assert.ok(Math.abs(center.lat - 48.8566) < 0.001 && Math.abs(center.lng - 2.3522) < 0.001, `vue rouverte : ${JSON.stringify(center)}`);
+  await page.screenshot({ path: join(OUT, 'reperage.png') });
+  await context.close();
+});
+
 await browser.close();
 close();
 if (consoleErrors.length) {

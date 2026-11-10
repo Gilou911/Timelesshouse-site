@@ -10,8 +10,19 @@ Pensée pour vivre sur `perso.timelesshouse.org`.
 - Mode « Heures de soleil » : carte colorée du nombre d'heures de soleil direct reçues en chaque point sur la journée.
 - Clic sur la carte : heures de soleil direct reçues par ce point ce jour-là, avec les créneaux.
 - Course du soleil tracée autour du point (graduations horaires, direction du soleil et de l'ombre).
+- Repérage de tournage :
+  - **Cérémonie** : date et heure d'un événement ; la barre du temps passe d'un geste du jour de la cérémonie à celui du
+    repérage, chacun gardant son heure, et un trait marque l'heure de la cérémonie sur la frise.
+  - **Heures dorée et bleue** en bandes sur la frise du temps (soleil de −4° à +6°, et de −6° à −4°), avec leurs créneaux.
+  - **Façade ou axe de prise de vue** : orientation lue sur le mur le plus proche (ou réglée à la main), créneaux où le
+    soleil l'éclaire, flèche de la façade vers la caméra.
+  - **Hauteur du point** mesuré : un étage, un balcon, un drone (1,5 m par défaut).
+  - **Lune** : phase, part éclairée, lever, coucher, direction et hauteur à l'heure choisie.
+  - **Carnet de lieux** : lieux nommés gardés dans le navigateur (vue, point, façade, cérémonie, date), rouverts d'un
+    geste, aussi depuis le champ de recherche vide.
 - Bâtiments 3D, relief 3D, fond plan ou satellite, intensité des ombres réglable.
-- Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (vue, date, heure, couches, mode, intensité, point).
+- Recherche de lieu (ou coordonnées), géolocalisation, lien partageable (vue, date, heure, couches, mode, intensité, point,
+  cérémonie, façade, hauteur du point).
 - Fuseau horaire détecté automatiquement d'après l'endroit affiché.
 - Sans clé d'API, sans compte, sans serveur : des fichiers statiques et des sources de données ouvertes.
 
@@ -109,7 +120,8 @@ Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
 
 ```bash
 npm install          # dépendances de développement uniquement (MapLibre, tz-lookup pour vendor/)
-npm test             # tests unitaires : position du soleil (référence NREL SPA), moteur d'ombres, fuseaux, URL
+npm test             # tests unitaires : soleil (référence NREL SPA), lune (référence astronomy-engine), bandes de lumière,
+                     # façades, moteur d'ombres, fuseaux, URL, carnet de lieux
 npm run serve        # http://localhost:8787 — fond de carte factice (style OpenFreeMap réel, tuiles de test) et vrai relief
 npm run test:e2e     # Chromium + Playwright : rendu réel, captures dans tests/e2e/out/
                      # (Playwright n'est pas dans package.json : npm install -D playwright && npx playwright install chromium ;
@@ -136,7 +148,10 @@ avant `js/app.js`. Toutes les clés sont facultatives.
 
 ## Comment ça marche
 
-1. **Soleil** (`js/sun.js`) : algorithme NOAA (Meeus) — azimut, élévation avec réfraction, lever/coucher, crépuscules.
+1. **Soleil** (`js/sun.js`) : algorithme NOAA (Meeus) — azimut, élévation avec réfraction, lever/coucher ; bandes de
+   lumière de la frise (nuit, heure bleue, heure dorée, jour) par échantillonnage de l'élévation toutes les 4 minutes.
+   **Lune** (`js/moon.js`) : « MiniMoon » de Montenbruck et Pfleger, à 0,02° près d'astronomy-engine ; lever et coucher
+   à moins de 30 s.
    Vérifié contre pvlib (NREL SPA) à mieux que 0,05°.
 2. **Champ de hauteurs** (`js/shadow-worker.js`) : pour la vue courante (plus une marge de 30 %), le worker télécharge
    les tuiles de relief Terrarium, les échantillonne en bilinéaire, puis rasterise les emprises de bâtiments
@@ -172,6 +187,11 @@ Si le trafic devient important, pensez à héberger vos propres tuiles (OpenFree
 - Le relief a une résolution de 30 m environ (mieux en Europe) : les ombres fines des petits reliefs sont lissées.
 - Les ombres des bâtiments situés juste hors de la zone chargée peuvent manquer en bord de carte.
 - Les arbres ne sont pas pris en compte.
+- Lever et coucher du soleil et de la lune sont astronomiques : le relief qui masque l'horizon n'y entre pas (il entre en
+  revanche dans les heures de soleil d'un point et d'une façade).
+- La façade est lue sur les emprises de bâtiments de la carte : un mur absent d'OpenStreetMap ne sera pas trouvé, et
+  l'orientation se règle alors à la main.
+- Le carnet de lieux reste dans le navigateur où il a été rempli : il ne passe pas d'un appareil à l'autre.
 - À l'échelle d'un pays ou d'un continent, la direction du soleil est celle du centre de la carte ; seule la limite
   jour/nuit (terminateur) est calculée point par point.
 - Quand la vue est plus large que le monde, la grille couvre exactement un tour de la Terre et la carte la répète
